@@ -1,0 +1,91 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backtest",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_backtest.py",
+      "args": [
+        "--symbol",
+        "BTC/USDT",
+        "--timeframe",
+        "15m",
+        "--days",
+        "90",
+        "--fast",
+        "9",
+        "--slow",
+        "21",
+        "--signal-data",
+        "index"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Live bot (DEMO)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_live.py",
+      "args": [
+        "--symbol",
+        "BTC/USDT",
+        "--timeframe",
+        "15m",
+        "--fast",
+        "9",
+        "--slow",
+        "21",
+        "--signal-data",
+        "index",
+        "--size",
+        "0.001"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "name": "MS VWAP backtest",
+      "program": "${workspaceFolder}/run_backtest_vwap.py",
+      "args": [
+        "--days",
+        "365"
+      ]
+    },
+    {
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "name": "MS VWAP live (DEMO)",
+      "program": "${workspaceFolder}/run_live_vwap.py",
+      "args": []
+    },
+    {
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "name": "MS structure backtest",
+      "program": "${workspaceFolder}/run_backtest_ms.py",
+      "args": [
+        "--days",
+        "365"
+      ]
+    },
+    {
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "name": "MS structure live (DEMO)",
+      "program": "${workspaceFolder}/run_live_ms.py",
+      "args": []
+    }
+  ]
+}
