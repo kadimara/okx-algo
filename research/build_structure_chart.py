@@ -2,12 +2,14 @@
 
 Usage: python build_chart.py   (run with the okx-algo venv; writes btc-market-structure.html next to this file)
 """
+import bisect
 import json
 import sys
 from pathlib import Path
 
 REPO = str(Path(__file__).resolve().parent.parent)   # the okx-algo repo root
 sys.path.insert(0, REPO)
+sys.path.insert(0, str(Path(__file__).parent))
 
 import pandas as pd
 
@@ -58,8 +60,212 @@ for hrs in LOWER_HOURS:
             areas.append([T[e], T[i], round(float(sl["bos_level"].iat[i]), 1), round(float(l[e] if d == 1 else h[e]), 1), d, T[p]])
     lower[str(hrs)] = areas
 
-data = {"tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower}
+# Leg swings (matched to a hand-labelled TradingView chart): the 8-candle break structure, then the smallest
+# leg under MIN_LEG % is removed again and again (the pair goes, the more extreme neighbour of each side stays)
+# until every leg is at least MIN_LEG %. The last leg is still forming and is never removed.
+LEG_N, MIN_LEG = 8, 2.5
+
+
+def base_swings(df, n):
+    """The 8-candle break-structure swings: [pivot time, "h" | "l", price, confirmed time]."""
+    base = bos_pivot_list(df, analyze_bos_structure(df, n))
+    return [[ts(r.pivot_time), r.type[0], float(r.price), ts(r.confirmed_at)] for r in base.itertuples()]
+
+
+def swing_events(df, n):
+    """Every swing as it was confirmed, in confirmation order, including the ones a more extreme swing of the same
+    type replaced later (base_swings has dropped those, which is hindsight): [pivot time, "h" | "l", price, confirmed]."""
+    ev = analyze_bos_structure(df, n).attrs.get("events", [])
+    return [[T[pi], ty[0], float(price), T[ci]] for pi, ci, ty, _, price, _ in ev]
+
+
+def merge_legs(P, min_leg):
+    """Remove the smallest leg under min_leg % again and again; the first and last swing always stay."""
+    while True:
+        small = [(abs(P[i + 1][2] - P[i][2]) / P[i][2] * 100, i) for i in range(1, len(P) - 2)]
+        small = [s for s in small if s[0] < min_leg]
+        if not small:
+            return P
+        i = min(small)[1]
+        merged = []
+        for p in P[:i] + P[i + 2:]:
+            if merged and merged[-1][1] == p[1]:
+                if (p[2] > merged[-1][2]) == (p[1] == "h"):
+                    merged[-1] = p
+            else:
+                merged.append(p)
+        P = merged
+
+
+def structure(close, P, i0, i1):
+    """The leg structure on swings P over candles i0..i1-1, read like the hand-labelled chart (a close, not a wick,
+    breaks a level):
+    - a close below the structural low is a bearish break: the highest swing high since that low was set becomes
+      the structural LH, the leg's next swing low the new LL, and the first swing high after that LL is taken
+      as the LH right away, so the range to break is [LL, LH];
+    - swings inside the range that break nothing are internal. Bullish mirrored.
+    A swing is used from its pivot candle on, so this only has no hindsight when every swing in P is confirmed."""
+    at = {t_idx[p[0]]: k for k, p in enumerate(P)}
+    hi = lo = None                # indices into P of the structural high / low (None = waiting for the leg's extreme)
+    need, trend, keep, brk = None, 0, set(), i0
+    breaks = []                   # every close through a structural level: [candle index, direction, level, trend before]
+    bias = [0] * (i1 - i0)        # trend at each candle's close
+    since_hi = since_lo = None    # lowest swing low since hi was set / highest swing high since lo was set
+    for i in range(i0, i1):
+        if hi is not None and close[i] > P[hi][2]:          # bullish break
+            breaks.append([i, 1, P[hi][2], trend])
+            # the HL / LL the break started from: the lowest swing low since the broken high
+            cand = [x for x in (since_hi, lo if lo is not None and lo > hi else None) if x is not None]
+            if cand:
+                new = min(cand, key=lambda x: P[x][2])
+                if new != lo and lo is not None and lo > hi:
+                    keep.discard(lo)                        # a lower low in the same pullback replaces it
+                lo = new
+                keep.add(lo)
+            trend, hi, need, since_lo, brk = 1, None, None, None, i
+        elif lo is not None and close[i] < P[lo][2]:        # bearish break
+            breaks.append([i, -1, P[lo][2], trend])
+            cand = [x for x in (since_lo, hi if hi is not None and hi > lo else None) if x is not None]
+            if cand:
+                new = max(cand, key=lambda x: P[x][2])
+                if new != hi and hi is not None and hi > lo:
+                    keep.discard(hi)                        # a higher high in the same pullback replaces it
+                hi = new
+                keep.add(hi)
+            trend, lo, need, since_hi, brk = -1, None, None, None, i
+        bias[i - i0] = trend
+        k = at.get(i)
+        if k is None:
+            continue
+        ty, price = P[k][1], P[k][2]
+        if ty == "h":
+            if hi is None or need == "h":                   # the leg's high after a bullish break, or the first LH
+                hi, since_hi = k, None
+                keep.add(k)
+                need = "l" if trend > 0 else None
+            elif since_lo is None or price > P[since_lo][2]:
+                since_lo = k
+        else:
+            if lo is None or need == "l":
+                lo, since_lo = k, None
+                keep.add(k)
+                need = "h" if trend < 0 else None
+            elif since_hi is None or price < P[since_hi][2]:
+                since_hi = k
+    return {"hi": hi, "lo": lo, "trend": trend, "keep": keep, "brk": brk, "breaks": breaks, "bias": bias}
+
+
+def leg_swings(df, n, min_leg):
+    """The leg swings and structure as drawn now, with hindsight (labels, current MSB / BoS)."""
+    P = merge_legs(base_swings(df, n), min_leg)
+    st = structure(df["close"].to_numpy(float), P, 0, len(df))
+    hi, lo, trend, keep, brk = st["hi"], st["lo"], st["trend"], st["keep"], st["brk"]
+    # BoS = the structural level in the trend direction, MSB = the one against it
+    msb, bos = (hi, lo) if trend < 0 else (lo, hi)
+    msb = [P[msb][0], round(P[msb][2], 1)]
+    if bos is None:                                         # the leg after the last break has no swing yet
+        seg = df["low" if trend < 0 else "high"].to_numpy(float)[brk:]
+        j = brk + int(seg.argmin() if trend < 0 else seg.argmax())
+        bos = [T[j], round(float(seg[j - brk]), 1)]
+    else:
+        bos = [P[bos][0], round(P[bos][2], 1)]
+    out, last = [], {}
+    for k, (t, ty, price, conf) in enumerate(P):
+        prev = last.get(ty)
+        lab = ("HH" if prev is None or price > prev else "LH") if ty == "h" else ("LL" if prev is None or price < prev else "HL")
+        if k in keep:
+            last[ty] = price
+        out.append([t, ty, lab, round(price, 1), conf, k not in keep])
+    levels = {"trend": trend, "msb": msb, "bos": bos}
+    return out, levels, st["bias"], st["breaks"]
+
+
+def live_structure(df, n, min_leg, window=120):
+    """Replays the leg structure close by close without hindsight: each time swings are confirmed, the legs are
+    rebuilt from the last `window` confirmed swings only and the structure runs on until the next confirmation.
+    Returns per candle the trend at its close, the breaks ([candle, direction, level, trend before]) and the swing
+    start (pivot time of the latest settled leg high: one with at least two leg swings after it)."""
+    close = df["close"].to_numpy(float)
+    ev = swing_events(df, n)
+    conf_i = [t_idx[p[3]] for p in ev]                      # ev is in confirmation order
+    events = sorted(set(conf_i))
+    trend, start, breaks = [0] * len(df), [None] * len(df), []
+    for e, c in enumerate(events):
+        c2 = events[e + 1] if e + 1 < len(events) else len(df)
+        known = ev[:bisect.bisect_right(conf_i, c)][-2 * window:]
+        # a swing replaced by a more extreme one of the same type (both known by now) is dropped, like base_swings
+        known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
+        P = merge_legs(known[-window:], min_leg)
+        i0 = t_idx[P[0][0]]
+        st = structure(close, P, i0, c2)
+        trend[c:c2] = st["bias"][c - i0:]
+        breaks += [b for b in st["breaks"] if b[0] >= c]
+        highs = [p[0] for p in P[:-2] if p[1] == "h"]
+        start[c:c2] = [highs[-1] if highs else None] * (c2 - c)
+    for b in breaks:
+        b[3] = trend[b[0] - 1]
+    return trend, breaks, start
+
+
+def bias_bar(trend, breaks):
+    """The bias bar as seen live: a CHoCH (break against the confirmed trend) is grey (+-0.5) until the new trend
+    makes its first BoS (then it is confirmed) or price breaks back in the old direction (the CHoCH failed and the
+    old trend continues). A reversal is any change of the live trend (a close through the MSB, or the legs being
+    rebuilt when a swing is confirmed); a BoS is a close through the level in the trend direction."""
+    bar, conf, pend = [0.0] * len(trend), 0, None
+    bos = {b[0] for b in breaks if b[1] == b[3]}
+    for i in range(1, len(trend)):
+        d = trend[i]
+        if d != trend[i - 1] and d != 0:
+            if d == conf:                                   # back to the confirmed trend: the CHoCH failed
+                pend = None
+            else:                                           # a CHoCH against the confirmed trend
+                pend = d
+        elif i in bos:
+            if pend is not None and d == pend:              # first BoS of the new trend confirms it
+                conf, pend = d, None
+            elif pend is None:
+                conf = d
+        bar[i] = pend / 2 if pend is not None else conf
+    return bar
+
+
+t_idx = {t: i for i, t in enumerate(T)}
+legs, leg_levels, _, _ = leg_swings(sig, LEG_N, MIN_LEG)
+live_trend, live_breaks, swing_start = live_structure(sig, LEG_N, MIN_LEG)
+leg_bias = bias_bar(live_trend, live_breaks)
+
+
+# Supply zones: every 8-candle swing high (the base swings of the legs, as confirmed live). Zone = the full range of the candle that made
+# the high. Live, no hindsight: a zone shows from the first close at which (1) its swing high is confirmed, (2) the
+# trend is bearish (a bearish CHoCH or a downtrend) and (3) it is still alive. It ends at the first candle that trades
+# back into it after price left it (a high below it), at a higher high, or when a newer leg high settles (the next
+# swing starts: zones only count for the current swing). [tShow, tEnd (None = still active), top, bottom]
+def supply_zones(df, n, trend, start):
+    H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
+    out = []
+    for t, ty, price, conf in swing_events(df, n):
+        if ty != "h":
+            continue
+        j, c = t_idx[t], t_idx[conf]
+        top, bot, left, shown, end = H[j], L[j], False, None, None
+        for k in range(j + 1, len(df)):
+            if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t):
+                end = k
+                break
+            left = left or H[k] < bot
+            if shown is None and k >= c and trend[k] < 0:
+                shown = k
+        if shown is not None:
+            out.append([T[shown], None if end is None else T[end], round(top, 1), round(bot, 1)])
+    return out
+
+
+supply = supply_zones(sig, LEG_N, live_trend, swing_start)
+
+data = {"supply": supply, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
+        "legs": legs, "legLevels": leg_levels, "legBias": leg_bias, "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower CHoCH areas;", f"{len(candles)} candles, {len(swings)} swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower CHoCH areas;", f"{len(supply)} supply zones ({sum(z[1] is None for z in supply)} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")

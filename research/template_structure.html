@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* Layout: a terminal-style workspace. Header, settings strip, control bar, full-width chart, legend. */
+/* Layout: a terminal-style workspace. Header, control bar, full-width chart, legend. */
 :root {
   --bg: #f5f6f8; --panel: #ffffff; --fg: #1b2230; --muted: #5d6779; --line: #dde1e8; --grid: #eceff3;
   --up: #0f8f74; --down: #c8414f; --up-soft: rgba(15,143,116,.45); --down-soft: rgba(200,65,79,.45); --accent: #2d5bd8;
@@ -25,10 +25,6 @@ body { background: var(--bg); color: var(--fg); font-family: var(--sans); }
 header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
 h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; text-wrap: balance; }
 .sub { color: var(--muted); font-size: .85rem; }
-.swingset { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.swingset div { background: var(--panel); padding: 8px 12px; min-width: 0; }
-.swingset dt { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 3px; }
-.swingset dd { margin: 0; font: .8rem var(--mono); line-height: 1.45; }
 .bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .seg button { font: 500 .8rem var(--mono); background: var(--panel); color: var(--muted); border: 0; padding: 6px 11px; cursor: pointer; }
@@ -58,16 +54,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
 <div class="wrap">
   <header>
     <h1>BTC Market Structure</h1>
-    <span class="sub">OKX BTC-USD index · <span id="tf"></span> candles · market structure, 2-day swings</span>
+    <span class="sub">OKX BTC-USD index · <span id="tf"></span> candles · market structure, leg swings</span>
   </header>
-
-  <dl class="swingset" aria-label="LTF swing settings">
-    <div><dt>Swing size</dt><dd id="sN"></dd></div>
-    <div><dt>Pivot rule</dt><dd id="sRule"></dd></div>
-    <div><dt>Confirmed</dt><dd id="sConf"></dd></div>
-    <div><dt>Internal swings</dt><dd>On (LH / HL taken from the extreme candle at a break)</dd></div>
-    <div><dt>Labels</dt><dd>HH / LH vs previous high, LL / HL vs previous low; same-side swing replaces the last only if more extreme</dd></div>
-  </dl>
 
   <div class="bar">
     <div class="seg" role="group" aria-label="Period">
@@ -79,21 +67,24 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     </div>
     <div class="toggles">
       <label><input type="checkbox" id="tSw" checked><span class="sw" style="background:var(--fg)"></span>Swings</label>
-      <label for="lowSel">CHoCH areas, lower structure
-        <select id="lowSel"><option value="">off</option><option value="6" selected>6h swings</option><option value="12">12h swings</option><option value="24">24h swings</option></select>
+      <label for="swSel">Swing set
+        <select id="swSel"><option value="legs" selected>Legs ≥ min %</option><option value="swings">2-day</option></select>
       </label>
+      <label><input type="checkbox" id="tSz" checked><span class="sw" style="background:var(--down)"></span>Supply zones</label>
+      <label><input type="checkbox" id="tLv" checked><span class="sw" style="background:var(--muted)"></span>MSB / BoS lines</label>
     </div>
   </div>
 
   <div class="chart-box">
     <div class="readout" id="readout"></div>
     <div id="chart"></div>
-    <div class="strip-key">Bottom strip: LTF trend (green bullish, red bearish, grey neutral)</div>
+    <div class="strip-key">Bias bar: trend of the selected swing set (green bullish, red bearish, grey neutral). Legs %: as it was at each close, no hindsight (only swings confirmed by then). Grey after a CHoCH until the new trend makes its first BoS; a CHoCH that fails (price breaks back first) turns back to the old trend's colour from that close. RSI 14: Wilder RSI of the candle closes (≥ 70 overbought, ≤ 30 oversold)</div>
   </div>
 
   <div class="legend">
-    <div><code>▭</code> CHoCH areas of a lower structure (smaller swing size, chosen above): green = the lower structure turned bullish, red = turned bearish. The box runs from the extreme where the move started to the broken level, ending at the candle that closed through it. The solid line labelled CHoCH runs from the broken lower-structure swing to that close. Only CHoCHs in the direction of the 2-day trend are shown: green while the 2-day trend is bullish (a pullback ending), red while it is bearish.</div>
-    <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Faded = internal swing (made at a break, not a real pivot).</div>
+    <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Faded = internal swing: on the 2-day set a swing made at a break (not a real pivot); on the leg set a swing inside the range that broke no structure.</div>
+    <div><code>▭</code> Supply zones: the candle that made each 8-candle swing high, its full range. No hindsight: a box starts at the close where the zone became known (swing high confirmed, trend bearish: a bearish CHoCH or downtrend) and ends at the first candle that trades back into it after price left it, at a higher high, or when a newer leg high settles (zones only count for the current swing). Zones touched before they were known are not drawn. Bright boxes running to the right edge are still untouched.</div>
+    <div><code>┄</code> MSB / BoS: dotted lines at the current structure levels of the selected set (BoS = the last structural extreme, MSB = the swing that turns the trend when closed through). A close through the MSB line shifts the structure (against the trend); a close through the BoS line continues it. The bias bar follows the selected swing set.</div>
   </div>
 </div>
 
@@ -108,9 +99,6 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   const $ = id => document.getElementById(id);
 
   $("tf").textContent = D.tfh + "h";
-  $("sN").textContent = `${D.n} candles (${+(D.n * D.tfh / 24).toFixed(1)} days on ${D.tfh}h)`;
-  $("sRule").textContent = `High strictly above the ${D.n} candles before, ≥ the ${D.n} after (lows mirrored)`;
-  $("sConf").textContent = `${D.n} candles after the swing (${D.n * D.tfh}h)`;
 
   const css = () => { const s = getComputedStyle(document.documentElement), g = k => s.getPropertyValue(k).trim();
     return { fg: g("--fg"), bg: g("--panel"), muted: g("--muted"), line: g("--line"), up: g("--up"), down: g("--down"),
@@ -128,7 +116,43 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   const strip = chart.addHistogramSeries({ priceScaleId: "ltf", lastValueVisible: false, priceLineVisible: false, base: 0 });
   chart.priceScale("ltf").applyOptions({ scaleMargins: { top: 0.97, bottom: 0 } });
 
-  const show = { sw: true, low: "6" };
+  const show = { sw: true, low: "", set: "legs", lv: true, sz: true };
+  const bias = () => show.set === "legs" ? D.legBias : D.ltf;   // the bias bar follows the selected swing set
+  // MSB / BoS: dotted lines from the latest swing high and low to the right edge. Bearish (last high is a LH):
+  // the high is the MSB, the low the BoS; bullish mirrored.
+  const levels = {
+    chart: null, series: null, req: null,
+    attached(p) { this.chart = p.chart; this.series = p.series; this.req = p.requestUpdate; },
+    detached() {}, updateAllViews() {},
+    paneViews() { return [{ zOrder: () => "top", renderer: () => ({ draw: t => levels.paint(t) }) }]; },
+    paint(target) {
+      if (!show.lv || !this.chart) return;
+      let lv;
+      if (show.set === "legs") lv = [[D.legLevels.msb, "MSB"], [D.legLevels.bos, "BoS"]];
+      else {
+        const sw = D.swings, hi = [...sw].reverse().find(s => s[1] === "h"), lo = [...sw].reverse().find(s => s[1] === "l");
+        const bear = D.ltf[D.ltf.length - 1] < 0;
+        lv = [[hi && [hi[0], hi[3]], bear ? "MSB" : "BoS"], [lo && [lo[0], lo[3]], bear ? "BoS" : "MSB"]];
+      }
+      const ts = this.chart.timeScale(), s = this.series, lastC = C[C.length - 1][4];
+      target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
+        ctx.font = `500 ${Math.round(11 * vr)}px ${areas.font}`;
+        for (const [sv, name] of lv) {
+          if (!sv) continue;
+          const above = sv[1] > lastC;
+          const x0 = ts.logicalToCoordinate(tIdx.get(sv[0])), y = s.priceToCoordinate(sv[1]);
+          if (x0 == null || y == null) continue;
+          const yb = Math.round(y * vr) + 0.5, xa = x0 * hr, xb = bitmapSize.width;
+          ctx.strokeStyle = this.fg; ctx.fillStyle = this.fg; ctx.globalAlpha = 0.85;
+          ctx.lineWidth = Math.max(1, Math.round(1.5 * hr)); ctx.setLineDash([2 * hr, 4 * hr]);
+          ctx.beginPath(); ctx.moveTo(xa, yb); ctx.lineTo(xb, yb); ctx.stroke(); ctx.setLineDash([]);
+          ctx.textAlign = "left"; ctx.textBaseline = above ? "bottom" : "top";
+          ctx.fillText(`${name} ${sv[1].toLocaleString("en-US", { maximumFractionDigits: 0 })}`, Math.max(xa, 0) + 6 * hr, above ? yb - 3 * vr : yb + 3 * vr);
+        }
+        ctx.globalAlpha = 1;
+      });
+    }
+  };
 
   // CHoCH areas of the lower structure, drawn behind the candles. Area: [extremeT, breakT, brokenLevel, extreme, dir, brokenSwingT]
   const areas = {
@@ -164,18 +188,46 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       });
     }
   };
+  // Supply zones behind the candles: [t0, tEnd (null = active), top, bottom]; active zones run to the right edge
+  const supply = {
+    chart: null, series: null, req: null,
+    attached(p) { this.chart = p.chart; this.series = p.series; this.req = p.requestUpdate; },
+    detached() {}, updateAllViews() {},
+    paneViews() { return [{ zOrder: () => "bottom", renderer: () => ({ draw() {}, drawBackground: t => supply.paint(t) }) }]; },
+    paint(target) {
+      if (!show.sz || !this.chart) return;
+      const ts = this.chart.timeScale(), s = this.series, bar = ts.options().barSpacing || 6;
+      target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
+        ctx.strokeStyle = ctx.fillStyle = areas.cols.down; ctx.lineWidth = Math.max(1, Math.round(hr));
+        for (const [t0, t1, top, bot] of D.supply) {
+          const xa = ts.logicalToCoordinate(tIdx.get(t0)), xb = t1 == null ? null : ts.logicalToCoordinate(tIdx.get(t1));
+          if (xa == null) continue;
+          const x1 = (xa - bar / 2) * hr, x2 = t1 == null ? bitmapSize.width : xb * hr;
+          if (x2 < 0 || x1 > bitmapSize.width) continue;
+          const y1 = s.priceToCoordinate(top), y2 = s.priceToCoordinate(bot);
+          if (y1 == null || y2 == null) continue;
+          const h = Math.max(1, (y2 - y1) * vr);
+          ctx.globalAlpha = t1 == null ? 0.25 : 0.14; ctx.fillRect(x1, y1 * vr, x2 - x1, h);
+          ctx.globalAlpha = t1 == null ? 0.9 : 0.5; ctx.strokeRect(x1, y1 * vr, x2 - x1, h);
+        }
+        ctx.globalAlpha = 1;
+      });
+    }
+  };
+  candles.attachPrimitive(supply);
   candles.attachPrimitive(areas);
+  candles.attachPrimitive(levels);
 
   function draw() {
-    { const s = getComputedStyle(document.documentElement); areas.cols = { up: s.getPropertyValue("--up").trim(), down: s.getPropertyValue("--down").trim() }; areas.font = s.getPropertyValue("--mono").trim(); if (areas.req) areas.req(); }
+    { const s = getComputedStyle(document.documentElement); areas.cols = { up: s.getPropertyValue("--up").trim(), down: s.getPropertyValue("--down").trim() }; areas.font = s.getPropertyValue("--mono").trim(); levels.fg = s.getPropertyValue("--fg").trim(); if (areas.req) areas.req(); if (levels.req) levels.req(); if (supply.req) supply.req(); }
     const k = css();
     chart.applyOptions({ layout: { background: { type: "solid", color: k.bg }, textColor: k.muted, fontFamily: k.mono, fontSize: 11 },
       crosshair: { vertLine: { color: k.muted, labelBackgroundColor: k.muted }, horzLine: { color: k.muted, labelBackgroundColor: k.muted } } });
     candles.applyOptions({ upColor: k.up, downColor: k.down, wickUpColor: k.up, wickDownColor: k.down });
-    strip.setData(T.map((t, i) => ({ time: t, value: 1, color: D.ltf[i] > 0 ? k.up : D.ltf[i] < 0 ? k.down : k.line })));
+    strip.setData(T.map((t, i) => ({ time: t, value: 1, color: bias()[i] >= 1 ? k.up : bias()[i] <= -1 ? k.down : k.line })));
 
     const m = [];
-    if (show.sw) for (const [t, ty, lab, , , internal] of D.swings) {
+    if (show.sw) for (const [t, ty, lab, , , internal] of D[show.set]) {
       const good = lab === "HH" || lab === "HL";
       m.push({ time: t, position: ty === "h" ? "aboveBar" : "belowBar", shape: "circle", size: 0.4, text: lab,
         color: internal ? (good ? k.upSoft : k.downSoft) : (good ? k.up : k.down) });
@@ -191,15 +243,27 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   }
   btns.forEach(b => b.addEventListener("click", () => setPeriod(+b.dataset.days)));
   $("tSw").addEventListener("change", e => { show.sw = e.target.checked; draw(); });
-  $("lowSel").addEventListener("change", e => { show.low = e.target.value; draw(); });
+  $("swSel").addEventListener("change", e => { show.set = e.target.value; draw(); readout(C.length - 1); });
+  $("tSz").addEventListener("change", e => { show.sz = e.target.checked; draw(); });
+  $("tLv").addEventListener("change", e => { show.lv = e.target.checked; draw(); });
 
   const fmt = v => v.toLocaleString("en-US", { maximumFractionDigits: 1 });
   const date = t => new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ");
-  const pill = v => v > 0 ? '<span class="pill bull">bullish</span>' : v < 0 ? '<span class="pill bear">bearish</span>' : '<span class="pill neu">neutral</span>';
+  const pill = v => Math.abs(v) === 0.5 ? `<span class="pill neu">reversal ${v > 0 ? "↑" : "↓"}</span>` : v > 0 ? '<span class="pill bull">bullish</span>' : v < 0 ? '<span class="pill bear">bearish</span>' : '<span class="pill neu">neutral</span>';
+  // RSI(14) on the chart candles, Wilder smoothing (same as TradingView ta.rsi)
+  const RSI = (() => { const n = 14, out = C.map(() => null); let up = 0, dn = 0;
+    for (let i = 1; i < C.length; i++) {
+      const d = C[i][4] - C[i - 1][4], g = Math.max(d, 0), l = Math.max(-d, 0);
+      if (i <= n) { up += g / n; dn += l / n; } else { up = (up * (n - 1) + g) / n; dn = (dn * (n - 1) + l) / n; }
+      if (i >= n) out[i] = dn === 0 ? 100 : 100 - 100 / (1 + up / dn);
+    }
+    return out; })();
+  const rsiTag = v => v == null ? "–" : `<b style="color:${v >= 70 ? "var(--down)" : v <= 30 ? "var(--up)" : "var(--fg)"}">${v.toFixed(1)}</b>` +
+    (v >= 70 ? " overbought" : v <= 30 ? " oversold" : "");
   function readout(i) {
     const c = C[i];
     $("readout").innerHTML = `<span><b>${date(c[0])}</b> UTC</span><span>O <b>${fmt(c[1])}</b></span><span>H <b>${fmt(c[2])}</b></span>` +
-      `<span>L <b>${fmt(c[3])}</b></span><span>C <b>${fmt(c[4])}</b></span><span>LTF ${pill(D.ltf[i])}</span>`;
+      `<span>L <b>${fmt(c[3])}</b></span><span>C <b>${fmt(c[4])}</b></span><span>Bias ${pill(bias()[i])}</span><span>RSI 14 ${rsiTag(RSI[i])}</span>`;
   }
   chart.subscribeCrosshairMove(p => readout((p.time != null ? tIdx.get(p.time) : undefined) ?? C.length - 1));
   readout(C.length - 1);
