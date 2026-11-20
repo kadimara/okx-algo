@@ -71,7 +71,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
         <select id="swSel"><option value="legs" selected>Legs ≥ min %</option><option value="swings">2-day</option></select>
       </label>
       <label><input type="checkbox" id="tSz" checked><span class="sw" style="background:var(--down)"></span>Supply zones</label>
-      <label><input type="checkbox" id="tLv" checked><span class="sw" style="background:var(--muted)"></span>MSB / BoS lines</label>
+      <label><input type="checkbox" id="tLv" checked><span class="sw" style="background:var(--muted)"></span>MSS / MSB lines</label>
     </div>
   </div>
 
@@ -84,7 +84,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   <div class="legend">
     <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Faded = internal swing: on the 2-day set a swing made at a break (not a real pivot); on the leg set a swing inside the range that broke no structure.</div>
     <div><code>▭</code> Supply zones: the candle that made each 8-candle swing high, its full range. A box is drawn from that candle and only for zones that became known live (swing high confirmed) while the live bias (no hindsight) is bearish and before they were touched; it ends at the first candle that trades back into it after price left it, at a higher high, when the bias stops being bearish, or when a newer leg high settles (zones only count for the current swing). Zones touched before they were known are not drawn. Bright boxes running to the right edge are still untouched.</div>
-    <div><code>┄</code> MSB / BoS: dotted lines at the current structure levels of the selected set (BoS = the last structural extreme, MSB = the swing that turns the trend when closed through). A close through the MSB line shifts the structure (against the trend); a close through the BoS line continues it. The bias bar follows the selected swing set.</div>
+    <div><code>┄</code> MSS / MSB: dotted lines at the current structure levels of the selected set (MSB = the last structural extreme, MSS = the swing that turns the trend when closed through). A close through the MSS line shifts the structure (against the trend); a close through the MSB line continues it. The bias bar follows the selected swing set.</div>
   </div>
 </div>
 
@@ -118,8 +118,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
 
   const show = { sw: true, low: "", set: "legs", lv: true, sz: true };
   const bias = () => show.set === "legs" ? D.legBias : D.ltf;   // the bias bar follows the selected swing set
-  // MSB / BoS: dotted lines from the latest swing high and low to the right edge. Bearish (last high is a LH):
-  // the high is the MSB, the low the BoS; bullish mirrored.
+  // MSS / MSB: dotted lines from the latest swing high and low to the right edge. Bearish (last high is a LH):
+  // the high is the MSS, the low the MSB; bullish mirrored.
   const levels = {
     chart: null, series: null, req: null,
     attached(p) { this.chart = p.chart; this.series = p.series; this.req = p.requestUpdate; },
@@ -128,11 +128,11 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     paint(target) {
       if (!show.lv || !this.chart) return;
       let lv;
-      if (show.set === "legs") lv = [[D.legLevels.msb, "MSB"], [D.legLevels.bos, "BoS"]];
+      if (show.set === "legs") lv = [[D.legLevels.mss, "MSS"], [D.legLevels.msb, "MSB"]];
       else {
         const sw = D.swings, hi = [...sw].reverse().find(s => s[1] === "h"), lo = [...sw].reverse().find(s => s[1] === "l");
         const bear = D.ltf[D.ltf.length - 1] < 0;
-        lv = [[hi && [hi[0], hi[3]], bear ? "MSB" : "BoS"], [lo && [lo[0], lo[3]], bear ? "BoS" : "MSB"]];
+        lv = [[hi && [hi[0], hi[3]], bear ? "MSS" : "MSB"], [lo && [lo[0], lo[3]], bear ? "MSB" : "MSS"]];
       }
       const ts = this.chart.timeScale(), s = this.series, lastC = C[C.length - 1][4];
       target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
@@ -154,7 +154,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     }
   };
 
-  // CHoCH areas of the lower structure, drawn behind the candles. Area: [extremeT, breakT, brokenLevel, extreme, dir, brokenSwingT]
+  // MSS areas of the lower structure, drawn behind the candles. Area: [extremeT, breakT, brokenLevel, extreme, dir, brokenSwingT]
   const areas = {
     cols: { up: "", down: "" }, chart: null, series: null, req: null,
     attached(p) { this.chart = p.chart; this.series = p.series; this.req = p.requestUpdate; },
@@ -176,12 +176,12 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
           const col = d > 0 ? this.cols.up : this.cols.down;
           ctx.globalAlpha = 0.16; ctx.fillStyle = col; ctx.fillRect(x1, Math.min(y1, y2) * vr, x2 - x1, Math.abs(y2 - y1) * vr);
           ctx.globalAlpha = 0.8; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, Math.round(hr));
-          const yl = Math.round(y1 * vr) + 0.5;                     // CHoCH line: broken swing -> close through it
+          const yl = Math.round(y1 * vr) + 0.5;                     // MSS line: broken swing -> close through it
           const xpc = ts.logicalToCoordinate(tIdx.get(tp)), xp = xpc == null ? x1 : xpc * hr;
           ctx.globalAlpha = 1; ctx.lineWidth = Math.max(1, Math.round(1.5 * hr));
           ctx.beginPath(); ctx.moveTo(xp, yl); ctx.lineTo(x2, yl); ctx.stroke();
           ctx.fillStyle = col; ctx.textAlign = "center";
-          ctx.fillText("CHoCH", (xp + x2) / 2, d > 0 ? yl - 2 * vr : yl + 12 * vr);
+          ctx.fillText("MSS", (xp + x2) / 2, d > 0 ? yl - 2 * vr : yl + 12 * vr);
           ctx.textAlign = "start";
         }
         ctx.globalAlpha = 1;

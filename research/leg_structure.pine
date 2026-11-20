@@ -3,12 +3,12 @@
 //  - 8-candle swings + the swing a close through the last swing adds (analyze_bos_structure events)
 //  - each time swings are confirmed, the legs are rebuilt from the last `window` of them: the smallest leg under
 //    `minLeg` % is removed again and again (merge_legs), then the structure runs over those legs (structure)
-//  - bias strip: green / red = confirmed trend, grey = CHoCH open (until the first BoS of the new trend; a CHoCH
+//  - bias strip: green / red = confirmed trend, grey = MSS open (until the first MSB of the new trend; a MSS
 //    that fails turns back to the old colour)
 //  - supply zones: range of each swing-high candle, drawn from that candle once it is known while the bias is
 //    bearish (red); ended when price trades back in after leaving it, at a higher high, when the bias stops being
 //    bearish, or when a newer leg high settles
-//  - leg swings / MSB / BoS levels are drawn as they look now (like the chart page)
+//  - leg swings / MSS / MSB levels are drawn as they look now (like the chart page)
 //@version=6
 indicator("Leg Structure (live)", shorttitle = "Leg Structure", overlay = true, max_bars_back = 5000,
      max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
@@ -19,13 +19,13 @@ window   = input.int(80, "Replay window (swings)", minval = 20, maxval = 200,
      tooltip = "Swings used to rebuild the legs at each confirmation. 120 matches the Python chart exactly; 80 agrees on 99.8% of candles and is faster. Lower it if TradingView times out.")
 showBias = input.bool(true, "Bias strip")
 showLegs = input.bool(true, "Leg swings")
-showLvls = input.bool(true, "MSB / BoS levels")
-showBrk  = input.bool(true, "CHoCH / BoS markers")
+showLvls = input.bool(true, "MSS / MSB levels")
+showBrk  = input.bool(true, "MSS / MSB markers")
 showSz   = input.bool(true, "Supply zones")
 showTbl  = input.bool(true, "Bias + RSI(14) box")
 cUp      = input.color(#26a69a, "Bullish")
 cDn      = input.color(#ef5350, "Bearish")
-cGr      = input.color(#9e9e9e, "CHoCH open")
+cGr      = input.color(#9e9e9e, "MSS open")
 cSz      = input.color(#ef5350, "Supply zone")
 
 const int MAXBACK = 4999
@@ -273,24 +273,24 @@ else if pP.size() > 0
     brkDir := stepBreak(st, pP, kp, close, bar_index)
 int liveTrend = st.trend
 
-// ---------------------------------------------------------------- bias bar (grey while a CHoCH is open)
+// ---------------------------------------------------------------- bias bar (grey while a MSS is open)
 var int conf = 0
 var int pend = 0
 var int prevTr = 0
-bool isBoS = brkDir != 0 and brkDir == prevTr
-bool chochNew = false
+bool isMSB = brkDir != 0 and brkDir == prevTr
+bool mssNew = false
 bool failNew = false
 bool confirmNew = false
 if bar_index > 0
     if liveTrend != prevTr and liveTrend != 0
-        if liveTrend == conf    // back to the confirmed trend: the CHoCH failed
+        if liveTrend == conf    // back to the confirmed trend: the MSS failed
             failNew := pend != 0
             pend := 0
-        else                    // a CHoCH against the confirmed trend
+        else                    // a MSS against the confirmed trend
             pend := liveTrend
-            chochNew := true
-    else if isBoS
-        if pend != 0 and liveTrend == pend   // first BoS of the new trend confirms it
+            mssNew := true
+    else if isMSB
+        if pend != 0 and liveTrend == pend   // first MSB of the new trend confirms it
             conf := liveTrend
             pend := 0
             confirmNew := true
@@ -301,18 +301,18 @@ prevTr := liveTrend
 
 color biasCol = bias >= 1 ? cUp : bias <= -1 ? cDn : bias != 0 ? cGr : na
 plotshape(showBias, "Bias", shape.square, location.bottom, biasCol, size = size.tiny)
-plotshape(showBrk and chochNew and liveTrend == 1, "CHoCH up", shape.labelup, location.belowbar, cGr, text = "CHoCH", textcolor = color.white, size = size.tiny)
-plotshape(showBrk and chochNew and liveTrend == -1, "CHoCH down", shape.labeldown, location.abovebar, cGr, text = "CHoCH", textcolor = color.white, size = size.tiny)
-plotshape(showBrk and isBoS and liveTrend == 1, "BoS up", shape.triangleup, location.belowbar, cUp, text = "BoS", textcolor = cUp, size = size.tiny)
-plotshape(showBrk and isBoS and liveTrend == -1, "BoS down", shape.triangledown, location.abovebar, cDn, text = "BoS", textcolor = cDn, size = size.tiny)
-plotshape(showBrk and failNew and liveTrend == 1, "CHoCH failed (up)", shape.xcross, location.belowbar, cUp, size = size.tiny)
-plotshape(showBrk and failNew and liveTrend == -1, "CHoCH failed (down)", shape.xcross, location.abovebar, cDn, size = size.tiny)
+plotshape(showBrk and mssNew and liveTrend == 1, "MSS up", shape.labelup, location.belowbar, cGr, text = "MSS", textcolor = color.white, size = size.tiny)
+plotshape(showBrk and mssNew and liveTrend == -1, "MSS down", shape.labeldown, location.abovebar, cGr, text = "MSS", textcolor = color.white, size = size.tiny)
+plotshape(showBrk and isMSB and liveTrend == 1, "MSB up", shape.triangleup, location.belowbar, cUp, text = "MSB", textcolor = cUp, size = size.tiny)
+plotshape(showBrk and isMSB and liveTrend == -1, "MSB down", shape.triangledown, location.abovebar, cDn, text = "MSB", textcolor = cDn, size = size.tiny)
+plotshape(showBrk and failNew and liveTrend == 1, "MSS failed (up)", shape.xcross, location.belowbar, cUp, size = size.tiny)
+plotshape(showBrk and failNew and liveTrend == -1, "MSS failed (down)", shape.xcross, location.abovebar, cDn, size = size.tiny)
 
-alertcondition(chochNew and liveTrend == 1, "Bullish CHoCH", "Leg structure: bullish CHoCH (possible reversal up)")
-alertcondition(chochNew and liveTrend == -1, "Bearish CHoCH", "Leg structure: bearish CHoCH (possible reversal down)")
-alertcondition(confirmNew and liveTrend == 1, "Uptrend confirmed", "Leg structure: first BoS up, uptrend confirmed")
-alertcondition(confirmNew and liveTrend == -1, "Downtrend confirmed", "Leg structure: first BoS down, downtrend confirmed")
-alertcondition(failNew, "CHoCH failed", "Leg structure: CHoCH failed, old trend continues")
+alertcondition(mssNew and liveTrend == 1, "Bullish MSS", "Leg structure: bullish MSS (possible reversal up)")
+alertcondition(mssNew and liveTrend == -1, "Bearish MSS", "Leg structure: bearish MSS (possible reversal down)")
+alertcondition(confirmNew and liveTrend == 1, "Uptrend confirmed", "Leg structure: first MSB up, uptrend confirmed")
+alertcondition(confirmNew and liveTrend == -1, "Downtrend confirmed", "Leg structure: first MSB down, downtrend confirmed")
+alertcondition(failNew, "MSS failed", "Leg structure: MSS failed, old trend continues")
 
 // ---------------------------------------------------------------- supply zones
 var zones = array.new<Zone>()
@@ -381,18 +381,18 @@ if barstate.islast
                 if k > skip
                     lns.push(line.new(pT.get(k - 1), pP.get(k - 1), pT.get(k), v, color = color.new(cGr, 30), width = 1))
     if showLvls and nP > 0 and st.trend != 0
-        int msbK = st.trend < 0 ? st.hi : st.lo
-        int bosK = st.trend < 0 ? st.lo : st.hi
-        if msbK != -1
-            float y = pP.get(msbK)
-            lns.push(line.new(pT.get(msbK), y, bar_index, y, extend = extend.right, color = cGr, style = line.style_dashed))
-            lbls.push(label.new(bar_index + 3, y, "MSB " + str.tostring(y, format.mintick), color = #00000000,
+        int mssK = st.trend < 0 ? st.hi : st.lo
+        int msbK = st.trend < 0 ? st.lo : st.hi
+        if mssK != -1
+            float y = pP.get(mssK)
+            lns.push(line.new(pT.get(mssK), y, bar_index, y, extend = extend.right, color = cGr, style = line.style_dashed))
+            lbls.push(label.new(bar_index + 3, y, "MSS " + str.tostring(y, format.mintick), color = #00000000,
                  style = label.style_label_left, textcolor = cGr, size = size.small))
         int bx = na
         float by = na
-        if bosK != -1
-            bx := pT.get(bosK)
-            by := pP.get(bosK)
+        if msbK != -1
+            bx := pT.get(msbK)
+            by := pP.get(msbK)
         else                    // the leg after the last break has no swing yet: its extreme so far
             int len = math.min(bar_index - st.brk, MAXBACK)
             bx := bar_index
@@ -405,7 +405,7 @@ if barstate.islast
                         bx := bar_index - k
         color bc = st.trend > 0 ? cUp : cDn
         lns.push(line.new(bx, by, bar_index, by, extend = extend.right, color = bc))
-        lbls.push(label.new(bar_index + 3, by, "BoS " + str.tostring(by, format.mintick), color = #00000000,
+        lbls.push(label.new(bar_index + 3, by, "MSB " + str.tostring(by, format.mintick), color = #00000000,
              style = label.style_label_left, textcolor = bc, size = size.small))
     if showTbl
         string txt = bias >= 1 ? "Bullish" : bias <= -1 ? "Bearish" : bias > 0 ? "Reversal ↑" : bias < 0 ? "Reversal ↓" : "-"

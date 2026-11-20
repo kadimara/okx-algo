@@ -37,8 +37,8 @@ ltf = [{"bullish": 1, "bearish": -1}.get(x, 0) for x in trend]
 swings = [[ts(r.pivot_time), r.type[0], r.label, round(float(r.price), 1), ts(r.confirmed_at), r.how == "bos"]
           for r in bos_pivot_list(sig, plan).itertuples()]
 
-# CHoCH areas of a lower structure: for each CHoCH of a smaller swing size, the area from the extreme the
-# move started at (lowest low since the broken swing high for a bullish CHoCH) to the broken level,
+# MSS areas of a lower structure: for each MSS of a smaller swing size, the area from the extreme the
+# move started at (lowest low since the broken swing high for a bullish MSS) to the broken level,
 # spanning from that extreme candle to the candle that closed through. Several lower swing sizes in hours.
 from structure import analyze_bos_structure  # noqa: E402
 
@@ -52,7 +52,7 @@ for hrs in LOWER_HOURS:
         for d, col in ((1, "choch_up"), (-1, "choch_down")):
             if not sl[col].iat[i]:
                 continue
-            if ltf[i] != d:          # only CHoCHs in the direction of the 2-day trend (end of a pullback)
+            if ltf[i] != d:          # only MSSs in the direction of the 2-day trend (end of a pullback)
                 continue
             p = int(sl["bos_from_idx"].iat[i])
             seg = slice(p, i + 1)
@@ -156,19 +156,19 @@ def structure(close, P, i0, i1):
 
 
 def leg_swings(df, n, min_leg):
-    """The leg swings and structure as drawn now, with hindsight (labels, current MSB / BoS)."""
+    """The leg swings and structure as drawn now, with hindsight (labels, current MSS / MSB)."""
     P = merge_legs(base_swings(df, n), min_leg)
     st = structure(df["close"].to_numpy(float), P, 0, len(df))
     hi, lo, trend, keep, brk = st["hi"], st["lo"], st["trend"], st["keep"], st["brk"]
-    # BoS = the structural level in the trend direction, MSB = the one against it
-    msb, bos = (hi, lo) if trend < 0 else (lo, hi)
-    msb = [P[msb][0], round(P[msb][2], 1)]
-    if bos is None:                                         # the leg after the last break has no swing yet
+    # MSB = the structural level in the trend direction, MSS = the one against it
+    mss, msb = (hi, lo) if trend < 0 else (lo, hi)
+    mss = [P[mss][0], round(P[mss][2], 1)]
+    if msb is None:                                         # the leg after the last break has no swing yet
         seg = df["low" if trend < 0 else "high"].to_numpy(float)[brk:]
         j = brk + int(seg.argmin() if trend < 0 else seg.argmax())
-        bos = [T[j], round(float(seg[j - brk]), 1)]
+        msb = [T[j], round(float(seg[j - brk]), 1)]
     else:
-        bos = [P[bos][0], round(P[bos][2], 1)]
+        msb = [P[msb][0], round(P[msb][2], 1)]
     out, last = [], {}
     for k, (t, ty, price, conf) in enumerate(P):
         prev = last.get(ty)
@@ -176,7 +176,7 @@ def leg_swings(df, n, min_leg):
         if k in keep:
             last[ty] = price
         out.append([t, ty, lab, round(price, 1), conf, k not in keep])
-    levels = {"trend": trend, "msb": msb, "bos": bos}
+    levels = {"trend": trend, "mss": mss, "msb": msb}
     return out, levels, st["bias"], st["breaks"]
 
 
@@ -208,21 +208,21 @@ def live_structure(df, n, min_leg, window=120):
 
 
 def bias_bar(trend, breaks):
-    """The bias bar as seen live: a CHoCH (break against the confirmed trend) is grey (+-0.5) until the new trend
-    makes its first BoS (then it is confirmed) or price breaks back in the old direction (the CHoCH failed and the
-    old trend continues). A reversal is any change of the live trend (a close through the MSB, or the legs being
-    rebuilt when a swing is confirmed); a BoS is a close through the level in the trend direction."""
+    """The bias bar as seen live: a MSS (break against the confirmed trend) is grey (+-0.5) until the new trend
+    makes its first MSB (then it is confirmed) or price breaks back in the old direction (the MSS failed and the
+    old trend continues). A reversal is any change of the live trend (a close through the MSS, or the legs being
+    rebuilt when a swing is confirmed); a MSB is a close through the level in the trend direction."""
     bar, conf, pend = [0.0] * len(trend), 0, None
-    bos = {b[0] for b in breaks if b[1] == b[3]}
+    msb = {b[0] for b in breaks if b[1] == b[3]}
     for i in range(1, len(trend)):
         d = trend[i]
         if d != trend[i - 1] and d != 0:
-            if d == conf:                                   # back to the confirmed trend: the CHoCH failed
+            if d == conf:                                   # back to the confirmed trend: the MSS failed
                 pend = None
-            else:                                           # a CHoCH against the confirmed trend
+            else:                                           # a MSS against the confirmed trend
                 pend = d
-        elif i in bos:
-            if pend is not None and d == pend:              # first BoS of the new trend confirms it
+        elif i in msb:
+            if pend is not None and d == pend:              # first MSB of the new trend confirms it
                 conf, pend = d, None
             elif pend is None:
                 conf = d
@@ -238,7 +238,7 @@ leg_bias = bias_bar(live_trend, live_breaks)
 
 # Supply zones: every 8-candle swing high (the base swings of the legs, as confirmed live). Zone = the full range of the candle that made
 # the high. Live, no hindsight: a zone shows from the first close at which (1) its swing high is confirmed, (2) the
-# bias bar is bearish (red: a confirmed downtrend, not a grey CHoCH) and (3) it is still alive. It ends at the first
+# bias bar is bearish (red: a confirmed downtrend, not a grey MSS) and (3) it is still alive. It ends at the first
 # candle that trades back into it after price left it (a high below it), at a higher high, when the bias stops being
 # bearish, or when a newer leg high settles (the next swing starts: zones only count for the current swing). The box is drawn from the swing-high candle itself.
 # [tCandle, tEnd (None = still active), top, bottom]
@@ -270,4 +270,4 @@ data = {"supply": supply, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": l
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower CHoCH areas;", f"{len(supply)} supply zones ({sum(z[1] is None for z in supply)} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{len(supply)} supply zones ({sum(z[1] is None for z in supply)} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
