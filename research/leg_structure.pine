@@ -1,0 +1,413 @@
+// Leg structure (live, no hindsight): port of research/build_structure_chart.py for TradingView.
+// Made for BTC 1h. Everything is computed close by close, the same way as the live replay in Python:
+//  - 8-candle swings + the swing a close through the last swing adds (analyze_bos_structure events)
+//  - each time swings are confirmed, the legs are rebuilt from the last `window` of them: the smallest leg under
+//    `minLeg` % is removed again and again (merge_legs), then the structure runs over those legs (structure)
+//  - bias strip: green / red = confirmed trend, grey = CHoCH open (until the first BoS of the new trend; a CHoCH
+//    that fails turns back to the old colour)
+//  - supply zones: range of each swing-high candle, shown from the close it became known in a bearish trend, ended
+//    when price trades back in after leaving it, at a higher high, or when a newer leg high settles
+//  - leg swings / MSB / BoS levels are drawn as they look now (like the chart page)
+//@version=6
+indicator("Leg Structure (live)", shorttitle = "Leg Structure", overlay = true, max_bars_back = 5000,
+     max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+swingN   = input.int(8, "Swing candles", minval = 2)
+minLeg   = input.float(2.5, "Min leg %", minval = 0.1, step = 0.1)
+window   = input.int(80, "Replay window (swings)", minval = 20, maxval = 200,
+     tooltip = "Swings used to rebuild the legs at each confirmation. 120 matches the Python chart exactly; 80 agrees on 99.8% of candles and is faster. Lower it if TradingView times out.")
+showBias = input.bool(true, "Bias strip")
+showLegs = input.bool(true, "Leg swings")
+showLvls = input.bool(true, "MSB / BoS levels")
+showBrk  = input.bool(true, "CHoCH / BoS markers")
+showSz   = input.bool(true, "Supply zones")
+showTbl  = input.bool(true, "Bias + RSI(14) box")
+cUp      = input.color(#26a69a, "Bullish")
+cDn      = input.color(#ef5350, "Bearish")
+cGr      = input.color(#9e9e9e, "CHoCH open")
+cSz      = input.color(#ef5350, "Supply zone")
+
+const int MAXBACK = 4999
+
+// ---------------------------------------------------------------- types / helpers
+type St
+    int hi = -1        // index into the legs of the structural high (-1 = waiting for the leg's extreme)
+    int lo = -1
+    int need = 0       // 1 = the next swing high is the LH, -1 = the next swing low is the HL
+    int trend = 0
+    int sinceHi = -1   // lowest swing low since hi was set
+    int sinceLo = -1   // highest swing high since lo was set
+    int brk = 0        // bar of the last break
+
+type Zone
+    int piv
+    float top
+    float bot
+    bool left = false
+    box bx = na
+
+// A close through a structural level. Returns the break direction (0 = none).
+stepBreak(St s, array<float> pr, array<bool> kp, float cl, int i) =>
+    int dir = 0
+    if s.hi != -1 and cl > pr.get(s.hi)
+        dir := 1
+        int nw = s.sinceHi
+        if s.lo != -1 and s.lo > s.hi and (nw == -1 or pr.get(s.lo) < pr.get(nw))
+            nw := s.lo
+        if nw != -1
+            if nw != s.lo and s.lo != -1 and s.lo > s.hi
+                kp.set(s.lo, false)
+            s.lo := nw
+            kp.set(nw, true)
+        s.trend := 1
+        s.hi := -1
+        s.need := 0
+        s.sinceLo := -1
+        s.brk := i
+    else if s.lo != -1 and cl < pr.get(s.lo)
+        dir := -1
+        int nw = s.sinceLo
+        if s.hi != -1 and s.hi > s.lo and (nw == -1 or pr.get(s.hi) > pr.get(nw))
+            nw := s.hi
+        if nw != -1
+            if nw != s.hi and s.hi != -1 and s.hi > s.lo
+                kp.set(s.hi, false)
+            s.hi := nw
+            kp.set(nw, true)
+        s.trend := -1
+        s.lo := -1
+        s.need := 0
+        s.sinceHi := -1
+        s.brk := i
+    dir
+
+// A leg swing at its pivot candle.
+stepSwing(St s, array<int> ty, array<float> pr, array<bool> kp, int k) =>
+    float price = pr.get(k)
+    if ty.get(k) == 1
+        if s.hi == -1 or s.need == 1
+            s.hi := k
+            s.sinceHi := -1
+            kp.set(k, true)
+            s.need := s.trend > 0 ? -1 : 0
+        else if s.sinceLo == -1 or price > pr.get(s.sinceLo)
+            s.sinceLo := k
+    else
+        if s.lo == -1 or s.need == -1
+            s.lo := k
+            s.sinceLo := -1
+            kp.set(k, true)
+            s.need := s.trend < 0 ? 1 : 0
+        else if s.sinceHi == -1 or price < pr.get(s.sinceHi)
+            s.sinceHi := k
+    true
+
+// Remove the smallest leg under minLeg % again and again; the first and last swing always stay.
+mergeLegs(array<int> t, array<int> ty, array<float> pr, float ml) =>
+    bool done = false
+    while not done
+        int n = pr.size()
+        int best = -1
+        float bestSz = ml
+        if n >= 4
+            for i = 1 to n - 3
+                float sz = math.abs(pr.get(i + 1) - pr.get(i)) / pr.get(i) * 100
+                if sz < bestSz
+                    bestSz := sz
+                    best := i
+        if best == -1
+            done := true
+        else
+            nt = array.new<int>()
+            nty = array.new<int>()
+            np = array.new<float>()
+            for i = 0 to n - 1
+                if i != best and i != best + 1
+                    int y = ty.get(i)
+                    float v = pr.get(i)
+                    int m = nt.size()
+                    if m > 0 and nty.get(m - 1) == y
+                        if (v > np.get(m - 1)) == (y == 1)
+                            nt.set(m - 1, t.get(i))
+                            np.set(m - 1, v)
+                    else
+                        nt.push(t.get(i))
+                        nty.push(y)
+                        np.push(v)
+            t.clear()
+            ty.clear()
+            pr.clear()
+            t.concat(nt)
+            ty.concat(nty)
+            pr.concat(np)
+    true
+
+// ---------------------------------------------------------------- swings as confirmed (analyze_bos_structure events)
+var evT  = array.new<int>()     // pivot bar
+var evTy = array.new<int>()     // 1 = high, -1 = low
+var evP  = array.new<float>()
+
+pushEv(int t, int y, float p) =>
+    evT.push(t)
+    evTy.push(y)
+    evP.push(p)
+    if evT.size() > 2 * window
+        evT.shift()
+        evTy.shift()
+        evP.shift()
+    true
+
+var float lastHigh = na
+var float lastLow  = na
+var int lastHighB  = na
+var int lastLowB   = na
+var int lastType   = 0
+var bool highBroken = false
+var bool lowBroken  = false
+
+hiWin = ta.highest(high, swingN)
+loWin = ta.lowest(low, swingN)
+bool isPH = bar_index >= 2 * swingN and high[swingN] > hiWin[swingN + 1] and high[swingN] >= hiWin
+bool isPL = bar_index >= 2 * swingN and low[swingN] < loWin[swingN + 1] and low[swingN] <= loWin
+
+bool newEv = false
+newHi = array.new<int>()        // pivot bars of the swing highs confirmed on this bar (supply zones)
+int p = bar_index - swingN
+if isPH and (lastType != 1 or high[swingN] > lastHigh)
+    lastHigh := high[swingN]
+    lastHighB := p
+    highBroken := false
+    lastType := 1
+    pushEv(p, 1, lastHigh)
+    newHi.push(p)
+    newEv := true
+if isPL and (lastType != -1 or low[swingN] < lastLow)
+    lastLow := low[swingN]
+    lastLowB := p
+    lowBroken := false
+    lastType := -1
+    pushEv(p, -1, lastLow)
+    newEv := true
+if not lowBroken and not na(lastLow) and close < lastLow
+    lowBroken := true
+    if lastType == -1           // the high between the last low and this break becomes a swing
+        int len = math.min(bar_index - lastLowB, MAXBACK)
+        int hb = bar_index
+        float hp = high
+        if len > 0
+            for k = 0 to len - 1
+                if high[k] > hp
+                    hp := high[k]
+                    hb := bar_index - k
+        lastHigh := hp
+        lastHighB := hb
+        highBroken := false
+        lastType := 1
+        pushEv(hb, 1, hp)
+        newHi.push(hb)
+        newEv := true
+if not highBroken and not na(lastHigh) and close > lastHigh
+    highBroken := true
+    if lastType == 1
+        int len = math.min(bar_index - lastHighB, MAXBACK)
+        int lb = bar_index
+        float lp = low
+        if len > 0
+            for k = 0 to len - 1
+                if low[k] < lp
+                    lp := low[k]
+                    lb := bar_index - k
+        lastLow := lp
+        lastLowB := lb
+        lowBroken := false
+        lastType := -1
+        pushEv(lb, -1, lp)
+        newEv := true
+
+// ---------------------------------------------------------------- live replay of the leg structure
+var pT  = array.new<int>()
+var pTy = array.new<int>()
+var pP  = array.new<float>()
+var kp  = array.new<bool>()     // structural (kept) swings, for the labels
+var at  = map.new<int, int>()   // pivot bar -> leg index
+var St st = St.new()
+var float swStart = na          // pivot bar of the latest settled leg high (zones only count for the current swing)
+
+int brkDir = 0
+if newEv
+    pT.clear()
+    pTy.clear()
+    pP.clear()
+    int nEv = evT.size()
+    for k = 0 to nEv - 1        // a swing replaced by a more extreme one of the same type is dropped
+        if k == nEv - 1 or evTy.get(k + 1) != evTy.get(k)
+            pT.push(evT.get(k))
+            pTy.push(evTy.get(k))
+            pP.push(evP.get(k))
+    while pT.size() > window
+        pT.shift()
+        pTy.shift()
+        pP.shift()
+    mergeLegs(pT, pTy, pP, minLeg)
+    int nP = pT.size()
+    kp.clear()
+    at.clear()
+    for k = 0 to nP - 1
+        kp.push(false)
+        at.put(pT.get(k), k)
+    st := St.new()
+    int i0 = math.max(pT.get(0), bar_index - MAXBACK)
+    for i = i0 to bar_index
+        int d0 = stepBreak(st, pP, kp, close[bar_index - i], i)
+        if i == bar_index
+            brkDir := d0
+        if at.contains(i)
+            stepSwing(st, pTy, pP, kp, at.get(i))
+    swStart := na
+    if nP >= 3
+        for k = 0 to nP - 3
+            if pTy.get(k) == 1
+                swStart := pT.get(k)
+else if pP.size() > 0
+    brkDir := stepBreak(st, pP, kp, close, bar_index)
+int liveTrend = st.trend
+
+// ---------------------------------------------------------------- bias bar (grey while a CHoCH is open)
+var int conf = 0
+var int pend = 0
+var int prevTr = 0
+bool isBoS = brkDir != 0 and brkDir == prevTr
+bool chochNew = false
+bool failNew = false
+bool confirmNew = false
+if bar_index > 0
+    if liveTrend != prevTr and liveTrend != 0
+        if liveTrend == conf    // back to the confirmed trend: the CHoCH failed
+            failNew := pend != 0
+            pend := 0
+        else                    // a CHoCH against the confirmed trend
+            pend := liveTrend
+            chochNew := true
+    else if isBoS
+        if pend != 0 and liveTrend == pend   // first BoS of the new trend confirms it
+            conf := liveTrend
+            pend := 0
+            confirmNew := true
+        else if pend == 0
+            conf := liveTrend
+float bias = pend != 0 ? pend * 0.5 : conf
+prevTr := liveTrend
+
+color biasCol = bias >= 1 ? cUp : bias <= -1 ? cDn : bias != 0 ? cGr : na
+plotshape(showBias, "Bias", shape.square, location.bottom, biasCol, size = size.tiny)
+plotshape(showBrk and chochNew and liveTrend == 1, "CHoCH up", shape.labelup, location.belowbar, cGr, text = "CHoCH", textcolor = color.white, size = size.tiny)
+plotshape(showBrk and chochNew and liveTrend == -1, "CHoCH down", shape.labeldown, location.abovebar, cGr, text = "CHoCH", textcolor = color.white, size = size.tiny)
+plotshape(showBrk and isBoS and liveTrend == 1, "BoS up", shape.triangleup, location.belowbar, cUp, text = "BoS", textcolor = cUp, size = size.tiny)
+plotshape(showBrk and isBoS and liveTrend == -1, "BoS down", shape.triangledown, location.abovebar, cDn, text = "BoS", textcolor = cDn, size = size.tiny)
+plotshape(showBrk and failNew and liveTrend == 1, "CHoCH failed (up)", shape.xcross, location.belowbar, cUp, size = size.tiny)
+plotshape(showBrk and failNew and liveTrend == -1, "CHoCH failed (down)", shape.xcross, location.abovebar, cDn, size = size.tiny)
+
+alertcondition(chochNew and liveTrend == 1, "Bullish CHoCH", "Leg structure: bullish CHoCH (possible reversal up)")
+alertcondition(chochNew and liveTrend == -1, "Bearish CHoCH", "Leg structure: bearish CHoCH (possible reversal down)")
+alertcondition(confirmNew and liveTrend == 1, "Uptrend confirmed", "Leg structure: first BoS up, uptrend confirmed")
+alertcondition(confirmNew and liveTrend == -1, "Downtrend confirmed", "Leg structure: first BoS down, downtrend confirmed")
+alertcondition(failNew, "CHoCH failed", "Leg structure: CHoCH failed, old trend continues")
+
+// ---------------------------------------------------------------- supply zones
+var zones = array.new<Zone>()
+for j in newHi                  // replay the candles between the swing high and its confirmation
+    Zone z = Zone.new(j, high[bar_index - j], low[bar_index - j])
+    bool dead = false
+    if j + 1 <= bar_index - 1
+        for k = j + 1 to bar_index - 1
+            int off = bar_index - k
+            float hk = high[off]
+            float ss = swStart[off]
+            if hk > z.top or (z.left and hk >= z.bot) or (not na(ss) and ss > j)
+                dead := true
+                break
+            z.left := z.left or hk < z.bot
+    if not dead
+        zones.push(z)
+int nZ = zones.size()
+if nZ > 0
+    for idx = nZ - 1 to 0
+        Zone z = zones.get(idx)
+        if bar_index > z.piv
+            if high > z.top or (z.left and high >= z.bot) or (not na(swStart) and swStart > z.piv)
+                if not na(z.bx)
+                    z.bx.set_right(bar_index)
+                    z.bx.set_extend(extend.none)
+                    z.bx.set_bgcolor(color.new(cSz, 86))
+                zones.remove(idx)
+            else
+                z.left := z.left or high < z.bot
+                if na(z.bx) and liveTrend < 0 and showSz
+                    z.bx := box.new(bar_index, z.top, bar_index, z.bot, border_color = na,
+                         bgcolor = color.new(cSz, 75), extend = extend.right)
+
+// ---------------------------------------------------------------- leg swings, levels and bias box (as they look now)
+var array<label> lbls = array.new<label>()
+var array<line> lns = array.new<line>()
+var table tb = table.new(position.top_right, 2, 1, border_width = 1)
+rsi = ta.rsi(close, 14)
+if barstate.islast
+    for lb in lbls
+        lb.delete()
+    for ln in lns
+        ln.delete()
+    lbls.clear()
+    lns.clear()
+    int nP = pT.size()
+    if showLegs and nP > 1
+        int skip = math.min(10, nP - 2)     // the first swings of the window have no structure yet
+        float lastH = na
+        float lastL = na
+        for k = 0 to nP - 1
+            int y = pTy.get(k)
+            float v = pP.get(k)
+            string lab = y == 1 ? (na(lastH) or v > lastH ? "HH" : "LH") : (na(lastL) or v < lastL ? "LL" : "HL")
+            bool kept = kp.get(k)
+            if kept
+                if y == 1
+                    lastH := v
+                else
+                    lastL := v
+            if k >= skip
+                lbls.push(label.new(pT.get(k), v, lab, color = #00000000,
+                     style = y == 1 ? label.style_label_down : label.style_label_up,
+                     textcolor = kept ? (y == 1 ? cDn : cUp) : cGr, size = kept ? size.small : size.tiny))
+                if k > skip
+                    lns.push(line.new(pT.get(k - 1), pP.get(k - 1), pT.get(k), v, color = color.new(cGr, 30), width = 1))
+    if showLvls and nP > 0 and st.trend != 0
+        int msbK = st.trend < 0 ? st.hi : st.lo
+        int bosK = st.trend < 0 ? st.lo : st.hi
+        if msbK != -1
+            float y = pP.get(msbK)
+            lns.push(line.new(pT.get(msbK), y, bar_index, y, extend = extend.right, color = cGr, style = line.style_dashed))
+            lbls.push(label.new(bar_index + 3, y, "MSB " + str.tostring(y, format.mintick), color = #00000000,
+                 style = label.style_label_left, textcolor = cGr, size = size.small))
+        int bx = na
+        float by = na
+        if bosK != -1
+            bx := pT.get(bosK)
+            by := pP.get(bosK)
+        else                    // the leg after the last break has no swing yet: its extreme so far
+            int len = math.min(bar_index - st.brk, MAXBACK)
+            bx := bar_index
+            by := st.trend < 0 ? low : high
+            if len > 0
+                for k = 1 to len
+                    float v = st.trend < 0 ? low[k] : high[k]
+                    if st.trend < 0 ? v <= by : v >= by
+                        by := v
+                        bx := bar_index - k
+        color bc = st.trend > 0 ? cUp : cDn
+        lns.push(line.new(bx, by, bar_index, by, extend = extend.right, color = bc))
+        lbls.push(label.new(bar_index + 3, by, "BoS " + str.tostring(by, format.mintick), color = #00000000,
+             style = label.style_label_left, textcolor = bc, size = size.small))
+    if showTbl
+        string txt = bias >= 1 ? "Bullish" : bias <= -1 ? "Bearish" : bias > 0 ? "Reversal ↑" : bias < 0 ? "Reversal ↓" : "-"
+        tb.cell(0, 0, "Bias  " + txt, bgcolor = na(biasCol) ? cGr : biasCol, text_color = color.white, text_size = size.small)
+        color rc = rsi >= 70 ? cDn : rsi <= 30 ? cUp : color.gray
+        tb.cell(1, 0, "RSI 14  " + str.tostring(rsi, "#.0"), bgcolor = color.new(rc, 20), text_color = color.white, text_size = size.small)
