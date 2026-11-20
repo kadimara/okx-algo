@@ -164,14 +164,26 @@ def pivot_list(df: pd.DataFrame, state: pd.DataFrame, n: int) -> pd.DataFrame:
 #   4.   Trend: set to bullish when a confirmation leaves HH + HL, to bearish when
 #        it leaves LH + LL; any other combination keeps the previous trend.
 #   5.   BOS down: the first candle that CLOSES below the last swing low turns the
-#        trend bearish at once. If no swing high was confirmed since that low, the
-#        highest candle since it (the most recent one on a tie) becomes the new
-#        swing high right away (labelled LH/HH). BOS up is mirrored.
-#   6.   BOS targets: a BOS down stores the body bottom of the swing low BEFORE the
-#        broken one (short target until the next swing low is confirmed); a BOS
-#        up stores the body top of the swing high before the broken one.
+#        trend bearish at once. If use_internal and no swing high was confirmed
+#        since that low, the highest candle since it (the most recent one on a
+#        tie) becomes the new swing high right away (labelled LH/HH). BOS up is
+#        mirrored. A break against the current trend (bullish -> bearish or back)
+#        is a CHoCH, a break in the trend direction stays a BOS.
+#   6.   BOS targets: a BOS down stores the lower body bottom of the broken swing
+#        low and the one before it (short target until the next swing low is
+#        confirmed); a BOS up stores the higher body top of the broken swing high
+#        and the one before it.
+#   7.   Valid pivots: a BOS down confirms the swing high behind it (valid_high_idx,
+#        valid_high_choch = whether that break was a CHoCH); a BOS up confirms the
+#        swing low behind it. Only these swings are traded.
+#   8.   BOS numbers (long / short Pine scripts): continuation breaks are counted
+#        since the trend turned (BOS 1, 2, ...; a CHoCH is 0). The count of the
+#        other side resets whenever the trend is bullish / bearish.
+#        valid_low_num / valid_high_num = the number of the break that confirmed the swing.
+#
+# With use_internal=False this is also the HTF structure of the Pine script.
 # =============================================================================
-def analyze_bos_structure(df: pd.DataFrame, n: int) -> pd.DataFrame:
+def analyze_bos_structure(df: pd.DataFrame, n: int, use_internal: bool = True) -> pd.DataFrame:
     """Per-candle structure state at each candle's close (causal)."""
     size = len(df)
     ph, pl = find_pivots(df, n)
@@ -180,8 +192,10 @@ def analyze_bos_structure(df: pd.DataFrame, n: int) -> pd.DataFrame:
 
     f_cols = ("last_high", "last_low", "high_body", "low_body", "bos_long_tgt", "bos_short_tgt",
               "bos_level")
-    i_cols = ("last_high_idx", "last_low_idx", "bos_from_idx")
-    b_cols = ("conf_high", "conf_low", "bos_long", "bos_short", "bos_up", "bos_down")
+    i_cols = ("last_high_idx", "last_low_idx", "bos_from_idx", "valid_high_idx", "valid_low_idx",
+              "valid_high_num", "valid_low_num")
+    b_cols = ("conf_high", "conf_low", "bos_long", "bos_short", "bos_up", "bos_down",
+              "choch_up", "choch_down", "valid_high_choch", "valid_low_choch")
     s_cols = ("trend", "high_tag", "low_tag")
     out = {k: np.full(size, nan) for k in f_cols}
     out.update({k: np.full(size, -1, dtype=np.int64) for k in i_cols})
@@ -196,6 +210,9 @@ def analyze_bos_structure(df: pd.DataFrame, n: int) -> pd.DataFrame:
     low_broken = high_broken = False
     bos_l = bos_s = False
     bos_l_tgt = bos_s_tgt = nan
+    valid_high_b = valid_low_b = -1
+    valid_high_ch = valid_low_ch = False
+    bos_up_count = bos_dn_count = valid_high_num = valid_low_num = 0
     trend = "neutral"
     events = []   # (pivot_idx, confirmed_idx, type, label, price, how)
 
@@ -233,6 +250,11 @@ def analyze_bos_structure(df: pd.DataFrame, n: int) -> pd.DataFrame:
                 trend = "bullish"
             elif high_tag == "LH" and low_tag == "LL":
                 trend = "bearish"
+        # the BOS count starts again whenever the trend turns
+        if trend == "bullish":
+            bos_dn_count = 0
+        if trend == "bearish":
+            bos_up_count = 0
         # a newly confirmed swing ends the BOS setup on that side
         if conf_h:
             bos_l = False
@@ -241,10 +263,14 @@ def analyze_bos_structure(df: pd.DataFrame, n: int) -> pd.DataFrame:
 
         # ---- BOS down (rule 5)
         if not low_broken and not math.isnan(last_low) and c[i] < last_low:
+            choch = trend == "bullish"
+            bos_dn_count, bos_up_count = 0 if choch else bos_dn_count + 1, 0
             low_broken, trend = True, "bearish"
             out["bos_down"][i], out["bos_from_idx"][i], out["bos_level"][i] = True, last_low_b, last_low
-            bos_l, bos_s, bos_s_tgt = False, True, prev_low_body
-            if last_type == -1:
+            out["choch_down"][i] = choch
+            before = low_body if math.isnan(prev_low_body) else prev_low_body
+            bos_l, bos_s, bos_s_tgt = False, True, min(low_body, before)
+            if use_internal and last_type == -1:
                 length = min(i - last_low_b, PINE_MAX_BACK)
                 hb, hp = i, h[i]
                 for k in range(length):
@@ -256,13 +282,19 @@ def analyze_bos_structure(df: pd.DataFrame, n: int) -> pd.DataFrame:
                 high_broken, last_type = False, 1
                 high_tag = tag_high(hp, prev_high)
                 events.append((hb, i, "high", high_tag, hp, "bos"))
+            valid_high_b, valid_high_ch = last_high_b, choch   # this LH is confirmed by the break
+            valid_high_num = bos_dn_count
 
         # ---- BOS up (mirrored)
         if not high_broken and not math.isnan(last_high) and c[i] > last_high:
+            choch = trend == "bearish"
+            bos_up_count, bos_dn_count = 0 if choch else bos_up_count + 1, 0
             high_broken, trend = True, "bullish"
             out["bos_up"][i], out["bos_from_idx"][i], out["bos_level"][i] = True, last_high_b, last_high
-            bos_s, bos_l, bos_l_tgt = False, True, prev_high_body
-            if last_type == 1:
+            out["choch_up"][i] = choch
+            before = high_body if math.isnan(prev_high_body) else prev_high_body
+            bos_s, bos_l, bos_l_tgt = False, True, max(high_body, before)
+            if use_internal and last_type == 1:
                 length = min(i - last_high_b, PINE_MAX_BACK)
                 lb, lp = i, l[i]
                 for k in range(length):
@@ -274,8 +306,13 @@ def analyze_bos_structure(df: pd.DataFrame, n: int) -> pd.DataFrame:
                 low_broken, last_type = False, -1
                 low_tag = tag_low(lp, prev_low)
                 events.append((lb, i, "low", low_tag, lp, "bos"))
+            valid_low_b, valid_low_ch = last_low_b, choch      # this HL is confirmed by the break
+            valid_low_num = bos_up_count
 
         out["last_high"][i], out["last_low"][i] = last_high, last_low
+        out["valid_high_idx"][i], out["valid_low_idx"][i] = valid_high_b, valid_low_b
+        out["valid_high_choch"][i], out["valid_low_choch"][i] = valid_high_ch, valid_low_ch
+        out["valid_high_num"][i], out["valid_low_num"][i] = valid_high_num, valid_low_num
         out["last_high_idx"][i], out["last_low_idx"][i] = last_high_b, last_low_b
         out["high_body"][i], out["low_body"][i] = high_body, low_body
         out["bos_long"][i], out["bos_short"][i] = bos_l, bos_s

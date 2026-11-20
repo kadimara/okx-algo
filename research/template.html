@@ -1,0 +1,319 @@
+<title>BTC Market Structure</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a terminal-style workspace. Header, settings strip, control bar, full-width chart, legend. */
+:root {
+  --bg: #f5f6f8; --panel: #ffffff; --fg: #1b2230; --muted: #5d6779; --line: #dde1e8; --grid: #eceff3;
+  --up: #0f8f74; --down: #c8414f; --up-soft: rgba(15,143,116,.45); --down-soft: rgba(200,65,79,.45); --accent: #2d5bd8;
+  --poi-ph: #2d5bd8; --poi-is: #b7790f; --poi-hl: #8a4fd0;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11151c; --panel: #171c25; --fg: #e3e7ee; --muted: #8e98aa; --line: #283040; --grid: #1d2330;
+  --up: #2bb894; --down: #ec6371; --up-soft: rgba(43,184,148,.45); --down-soft: rgba(236,99,113,.45); --accent: #6f93ff;
+  --poi-ph: #6f93ff; --poi-is: #e3aa48; --poi-hl: #b58cff; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11151c; --panel: #171c25; --fg: #e3e7ee; --muted: #8e98aa; --line: #283040; --grid: #1d2330;
+  --up: #2bb894; --down: #ec6371; --up-soft: rgba(43,184,148,.45); --down-soft: rgba(236,99,113,.45); --accent: #6f93ff;
+  --poi-ph: #6f93ff; --poi-is: #e3aa48; --poi-hl: #b58cff; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); }
+.wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 32px; display: flex; flex-direction: column; gap: 14px; max-width: 1500px; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
+h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; text-wrap: balance; }
+.sub { color: var(--muted); font-size: .85rem; }
+.swingset { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; margin: 0; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.swingset div { background: var(--panel); padding: 8px 12px; min-width: 0; }
+.swingset dt { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 3px; }
+.swingset dd { margin: 0; font: .8rem var(--mono); line-height: 1.45; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { font: 500 .8rem var(--mono); background: var(--panel); color: var(--muted); border: 0; padding: 6px 11px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.seg button:focus-visible, .toggles input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .82rem; }
+.toggles label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.sw.box { height: 8px; background: var(--up); opacity: .5; }
+.chart-box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.readout { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 12px; border-bottom: 1px solid var(--line);
+  font: .78rem var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.2em; }
+.readout b { color: var(--fg); font-weight: 500; }
+.pill { padding: 1px 7px; border-radius: 10px; font-weight: 500; }
+.pill.bull { color: var(--up); background: color-mix(in srgb, var(--up) 14%, transparent); }
+.pill.bear { color: var(--down); background: color-mix(in srgb, var(--down) 14%, transparent); }
+.pill.neu { color: var(--muted); background: var(--grid); }
+#chart { height: min(68vh, 640px); min-height: 360px; width: 100%; }
+.strip-key { padding: 6px 12px; border-top: 1px solid var(--line); font-size: .74rem; color: var(--muted); }
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 24px; font-size: .82rem; color: var(--muted); }
+.legend div { min-width: 0; }
+.legend code { font-family: var(--mono); color: var(--fg); font-size: .78rem; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>BTC Market Structure</h1>
+    <span class="sub">OKX BTC-USD index · <span id="tf"></span> candles · LTF swings, trend and entry blocks</span>
+  </header>
+
+  <dl class="swingset" aria-label="LTF swing settings">
+    <div><dt>Swing size</dt><dd id="sN"></dd></div>
+    <div><dt>Pivot rule</dt><dd id="sRule"></dd></div>
+    <div><dt>Confirmed</dt><dd id="sConf"></dd></div>
+    <div><dt>Internal swings</dt><dd>On (LH / HL taken from the extreme candle at a break)</dd></div>
+    <div><dt>Labels</dt><dd>HH / LH vs previous high, LL / HL vs previous low; same-side swing replaces the last only if more extreme</dd></div>
+  </dl>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="Period">
+      <button data-days="30">1M</button>
+      <button data-days="91" aria-pressed="true">3M</button>
+      <button data-days="182">6M</button>
+      <button data-days="365">1Y</button>
+      <button data-days="0">All</button>
+    </div>
+    <div class="toggles">
+      <label><input type="checkbox" id="tSw" checked><span class="sw" style="background:var(--fg)"></span>Swings</label>
+      <label><input type="checkbox" id="tBox"><span class="sw box"></span>Entry blocks</label>
+      <label><input type="checkbox" id="tOb"><span class="sw box"></span>Order blocks</label>
+      <label><input type="checkbox" id="tPoiL" checked><span class="sw" style="background:var(--poi-hl)"></span>HL entries</label>
+      <label><input type="checkbox" id="tPoiS" checked><span class="sw" style="background:var(--poi-hl)"></span>LH entries</label>
+      <label><input type="checkbox" id="tTr" checked><span class="sw box"></span>Trades</label>
+    </div>
+  </div>
+
+  <div class="chart-box">
+    <div class="readout" id="readout"></div>
+    <div id="chart"></div>
+    <div class="strip-key">Bottom strip: LTF trend (green bullish, red bearish, grey neutral)</div>
+  </div>
+
+  <div class="legend">
+    <div><code>▲ ▼</code> sweep trades: the first candle that reaches the HL line (live once the HL is confirmed in a bullish trend or a break validates it) must wick through it and close back above it. Entry at that close, stop under the lower of the sweep wick and the HL wick, target the HH the pullback came from (or the highest high since the HL). Shorts mirrored at the LH. Red box = stop, green box = target, label = result after 0.1% fees. <span id="trStats"></span></div>
+    <div><code>HL LH</code> level lines from the HL (body low) or LH (body high) to the first touch: solid = swept (trade), dashed = not reached; ✕ = the touch candle closed through the line (no trade, level gone).</div>
+    <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Faded = internal swing (made at a break, not a real pivot).</div>
+    <div><code>▭</code> entry blocks: the full high–low range of each HL (green) or LH (red) that becomes active, either when it is confirmed in a matching trend or when a break validates it. From then on the box runs until price trades back into it (solid edge) or a newer swing on that side replaces it (dashed edge, never touched).</div>
+    <div><code>OB</code> order blocks: zones inside a swing where an impulse started. A strong candle leaves a gap (fair value gap of at least 1× ATR between the candles around it); the block is the full range of the lowest candle (highest for red) in the 12 candles before it. Only with the LTF trend: green blocks need a bullish trend when the gap completes, red ones bearish. Ends when price trades back in (solid), or when a new swing on that side confirms or the trend turns (dashed).</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function () {
+  // D: { tfh, n, candles: [t,o,h,l,c], ltf: [-1|0|1], swings: [t, "h"|"l", label, price, confirmedAt, internal],
+  //      boxes: [start, end, top, bottom, dir, touched, activatedAt, "confirmed"|"break"] }
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const C = D.candles, T = C.map(c => c[0]), lastT = T[T.length - 1];
+  const tIdx = new Map(T.map((t, i) => [t, i]));
+  const $ = id => document.getElementById(id);
+
+  $("tf").textContent = D.tfh + "h";
+  $("sN").textContent = `${D.n} candles (${+(D.n * D.tfh / 24).toFixed(1)} days on ${D.tfh}h)`;
+  $("sRule").textContent = `High strictly above the ${D.n} candles before, ≥ the ${D.n} after (lows mirrored)`;
+  $("sConf").textContent = `${D.n} candles after the swing (${D.n * D.tfh}h)`;
+
+  const css = () => { const s = getComputedStyle(document.documentElement), g = k => s.getPropertyValue(k).trim();
+    return { fg: g("--fg"), bg: g("--panel"), muted: g("--muted"), line: g("--line"), up: g("--up"), down: g("--down"),
+      upSoft: g("--up-soft"), downSoft: g("--down-soft"), mono: g("--mono"),
+      ph: g("--poi-ph"), is: g("--poi-is"), hl: g("--poi-hl") }; };
+
+  const chart = LightweightCharts.createChart($("chart"), { autoSize: true,
+    timeScale: { timeVisible: true, rightOffset: 8, borderVisible: false },
+    rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.06, bottom: 0.1 } },
+    grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+    crosshair: { mode: 0 }, localization: { priceFormatter: p => p.toLocaleString("en-US", { maximumFractionDigits: 0 }) } });
+  const candles = chart.addCandlestickSeries({ borderVisible: false, priceLineVisible: false });
+  candles.setData(C.map(c => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4] })));
+
+  const strip = chart.addHistogramSeries({ priceScaleId: "ltf", lastValueVisible: false, priceLineVisible: false, base: 0 });
+  chart.priceScale("ltf").applyOptions({ scaleMargins: { top: 0.97, bottom: 0 } });
+
+  const show = { sw: true, box: false, ob: false, poi: true, poiL: true, poiS: true, tr: true };
+
+  // Entry blocks, drawn behind the candles as a series primitive.
+  const boxes = {
+    cols: { up: "", down: "" }, chart: null, series: null, req: null,
+    attached(p) { this.chart = p.chart; this.series = p.series; this.req = p.requestUpdate; },
+    detached() {}, updateAllViews() {},
+    paneViews() { return [{ zOrder: () => "bottom", renderer: () => ({ draw() {}, drawBackground: t => boxes.paint(t) }) }]; },
+    paint(target) {
+      if (!this.chart) return;
+      const ts = this.chart.timeScale(), s = this.series, bar = ts.options().barSpacing || 6;
+      target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
+        ctx.font = `500 ${Math.round(10 * vr)}px ${this.font}`; ctx.textBaseline = "top";
+        for (const [t0, t1, top, bot, d, touched, , src] of D.boxes) {
+          if (src === "ob" ? !show.ob : !show.box) continue;
+          const xa = ts.logicalToCoordinate(tIdx.get(t0)), xb = ts.logicalToCoordinate(tIdx.get(t1));
+          if (xa == null || xb == null) continue;
+          const x1 = (xa - bar / 2) * hr, x2 = (xb + bar / 2) * hr;
+          if (x2 < 0 || x1 > bitmapSize.width) continue;
+          const y1 = s.priceToCoordinate(top), y2 = s.priceToCoordinate(bot);
+          if (y1 == null || y2 == null) continue;
+          const col = d > 0 ? this.cols.up : this.cols.down;
+          ctx.globalAlpha = touched ? 0.16 : 0.08; ctx.fillStyle = col;
+          ctx.fillRect(x1, y1 * vr, x2 - x1, (y2 - y1) * vr);
+          ctx.globalAlpha = touched ? 0.75 : 0.5; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, Math.round(hr));
+          ctx.setLineDash(touched ? [] : [4 * hr, 3 * hr]);
+          ctx.strokeRect(Math.round(x1) + 0.5, Math.round(y1 * vr) + 0.5, Math.round(x2 - x1), Math.round((y2 - y1) * vr));
+          if (src === "ob" && x2 - x1 > 22 * hr && (y2 - y1) * vr > 12 * vr) {
+            ctx.globalAlpha = 0.9; ctx.fillText("OB", x1 + 4 * hr, y1 * vr + 3 * vr);
+          }
+        }
+        ctx.globalAlpha = 1; ctx.setLineDash([]);
+        if (show.poi) this.paintLevels(ctx, ts, s, bar, hr, vr, bitmapSize);
+        if (show.tr) this.paintTrades(ctx, ts, s, bar, hr, vr, bitmapSize);
+      });
+    },
+    // Level: [dir, swingT, endT, entry, status] - the order line from the HL / LH to fill, removal or expiry
+    paintLevels(ctx, ts, s, bar, hr, vr, size) {
+      const X = t => ts.logicalToCoordinate(tIdx.get(t));
+      ctx.textBaseline = "middle";
+      for (const [d, t0, t1, px, status, kind] of D.levels) {
+        if (d > 0 ? !show.poiL : !show.poiS) continue;
+        const xa = X(t0), xb = X(t1), y = s.priceToCoordinate(px);
+        if (xa == null || xb == null || y == null) continue;
+        const x1 = xa * hr, x2 = (xb + bar / 2) * hr;
+        if (x2 < 0 || x1 > size.width) continue;
+        const yy = Math.round(y * vr) + 0.5, filled = status === "filled";
+        ctx.strokeStyle = ctx.fillStyle = kind === "IS" ? this.cols.is : this.cols.hl;
+        ctx.globalAlpha = filled ? 1 : 0.6; ctx.lineWidth = Math.max(1, Math.round((filled ? 2 : 1) * hr));
+        ctx.setLineDash(filled ? [] : [5 * hr, 4 * hr]);
+        ctx.beginPath(); ctx.moveTo(x1, yy); ctx.lineTo(x2, yy); ctx.stroke(); ctx.setLineDash([]);
+        ctx.globalAlpha = 1; ctx.fillText(kind === "IS" ? "IS" : d > 0 ? "HL" : "LH", x1 + 3 * hr, yy + (d > 0 ? -7 : 7) * vr);
+        if (status === "closed through") { ctx.fillStyle = this.cols.muted; ctx.fillText("✕", x2 + 3 * hr, yy); }
+      }
+      ctx.globalAlpha = 1;
+    },
+    // Trade: [dir, fillT, exitT, entry, initial stop, target, R or null (open), [[t, stop], ...]]
+    paintTrades(ctx, ts, s, bar, hr, vr, size) {
+      const X = t => ts.logicalToCoordinate(tIdx.get(t));
+      ctx.textBaseline = "middle";
+      for (const [d, tf, tx, entry, stop, target, r, steps, kind] of D.trades) {
+        if (d > 0 ? !show.poiL : !show.poiS) continue;
+        const xa = X(tf), xb = X(tx);
+        if (xa == null || xb == null) continue;
+        const x1 = (xa - bar / 2) * hr, x2 = (xb + bar / 2) * hr;
+        if (x2 < 0 || x1 > size.width) continue;
+        const ye = s.priceToCoordinate(entry), ys = s.priceToCoordinate(stop), yx = s.priceToCoordinate(target);
+        if (ye == null || ys == null || yx == null) continue;
+        const w = Math.max(x2 - x1, 2 * hr), win = r != null && r > 0;
+        ctx.globalAlpha = 0.18; ctx.fillStyle = this.cols.down;      // initial risk
+        ctx.fillRect(x1, Math.min(ye, ys) * vr, w, Math.abs(ys - ye) * vr);
+        ctx.fillStyle = this.cols.up; ctx.fillRect(x1, Math.min(ye, yx) * vr, w, Math.abs(yx - ye) * vr);   // target
+        ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(1, Math.round(hr));
+        ctx.strokeStyle = this.cols.fg;
+        ctx.beginPath(); ctx.moveTo(x1, Math.round(ye * vr) + 0.5); ctx.lineTo(x1 + w, Math.round(ye * vr) + 0.5); ctx.stroke();
+        ctx.strokeStyle = this.cols.down; ctx.setLineDash([3 * hr, 2 * hr]); ctx.beginPath();   // stop path (break-even move)
+        steps.forEach(([t, px], k) => {
+          const xs = X(t), y = s.priceToCoordinate(px);
+          if (xs == null || y == null) return;
+          const xx = k === 0 ? x1 : (xs + bar / 2) * hr, yy = Math.round(y * vr) + 0.5;
+          if (k === 0) ctx.moveTo(xx, yy); else { ctx.lineTo(xx, ctx.__lastY ?? yy); ctx.lineTo(xx, yy); }
+          ctx.__lastY = yy;
+        });
+        if (ctx.__lastY != null) ctx.lineTo(x1 + w, ctx.__lastY);
+        ctx.stroke(); ctx.setLineDash([]); ctx.__lastY = null;
+        const txt = (kind === "IS" ? "IS " : "") + (d > 0 ? "L " : "S ") + (r == null ? "open" : (r >= 0 ? "+" : "") + r.toFixed(1) + "R");
+        ctx.globalAlpha = 1; ctx.fillStyle = r == null ? this.cols.muted : win ? this.cols.up : this.cols.down;
+        const yl = d > 0 ? Math.min(ye, yx, ys) - 8 : Math.max(ye, yx, ys) + 8;
+        ctx.fillText(txt, x1, yl * vr);
+      }
+      ctx.globalAlpha = 1;
+    },
+    // POI: [break, end, broken level, t, impulse start, t, swing, t, pick, dir] (dir 1 = long, -1 = short)
+    paintPois(ctx, ts, s, bar, hr, vr, size) {
+      const X = t => ts.logicalToCoordinate(tIdx.get(t));
+      ctx.textBaseline = "middle";
+      for (const [tb, te, ph, phT, is, isT, hl, hlT, pick, d, reached] of D.pois) {
+        if (d > 0 ? !show.poiL : !show.poiS) continue;
+        const xe = X(te);
+        if (xe == null) continue;
+        const xr = (xe + bar / 2) * hr;
+        const xStart = Math.min(X(phT) ?? xe, X(isT) ?? xe, X(hlT) ?? xe) * hr;
+        if (xr < 0 || xStart > size.width) continue;
+        const lines = [["hl", hl, hlT, d > 0 ? "HL" : "LH"]];   // prev high/low and impulse start hidden for now
+        for (const [key, price, t0, lab] of lines) {
+          if (key === "is" && isT === hlT) continue;   // impulse start is the HL itself
+          const x0 = X(t0), y = s.priceToCoordinate(price);
+          if (x0 == null || y == null) continue;
+          const picked = reached, yy = Math.round(y * vr) + 0.5;
+          ctx.strokeStyle = ctx.fillStyle = this.cols[key];
+          ctx.globalAlpha = picked ? 1 : 0.7;
+          ctx.lineWidth = Math.max(1, Math.round((picked ? 2 : 1) * hr));
+          ctx.setLineDash(picked ? [] : [5 * hr, 4 * hr]);
+          ctx.beginPath(); ctx.moveTo(x0 * hr, yy); ctx.lineTo(xr, yy); ctx.stroke();
+          ctx.globalAlpha = 1; ctx.fillText(lab, x0 * hr + 3 * hr, yy + (d > 0 ? -7 : 7) * vr);
+        }
+        const tag = { failed: "✗", none: "↑", open: "…" }[pick] || "✓";
+        const yTag = s.priceToCoordinate(hl);
+        if (yTag != null) { ctx.fillStyle = pick === "failed" ? this.cols.down : this.cols.muted; ctx.fillText(tag, xr + 3 * hr, Math.round(yTag * vr)); }
+      }
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+  };
+  candles.attachPrimitive(boxes);
+
+  function draw() {
+    const k = css();
+    chart.applyOptions({ layout: { background: { type: "solid", color: k.bg }, textColor: k.muted, fontFamily: k.mono, fontSize: 11 },
+      crosshair: { vertLine: { color: k.muted, labelBackgroundColor: k.muted }, horzLine: { color: k.muted, labelBackgroundColor: k.muted } } });
+    candles.applyOptions({ upColor: k.up, downColor: k.down, wickUpColor: k.up, wickDownColor: k.down });
+    strip.setData(T.map((t, i) => ({ time: t, value: 1, color: D.ltf[i] > 0 ? k.up : D.ltf[i] < 0 ? k.down : k.line })));
+    boxes.cols = { up: k.up, down: k.down, ph: k.ph, is: k.is, hl: k.hl, muted: k.muted, fg: k.fg }; boxes.font = k.mono;
+    if (boxes.req) boxes.req();
+
+    const m = [];
+    if (show.sw) for (const [t, ty, lab, , , internal] of D.swings) {
+      const good = lab === "HH" || lab === "HL";
+      m.push({ time: t, position: ty === "h" ? "aboveBar" : "belowBar", shape: "circle", size: 0.4, text: lab,
+        color: internal ? (good ? k.upSoft : k.downSoft) : (good ? k.up : k.down) });
+    }
+    if (show.tr) for (const [d, tf, , , , , r, , kind] of D.trades) {
+      if (d > 0 ? !show.poiL : !show.poiS) continue;
+      m.push({ time: tf, position: d > 0 ? "belowBar" : "aboveBar", shape: d > 0 ? "arrowUp" : "arrowDown", size: 1,
+        color: r == null ? k.muted : r > 0 ? k.up : k.down, text: kind === "IS" ? "IS sweep" : "sweep" });
+    }
+    m.sort((a, b) => a.time - b.time);
+    candles.setMarkers(m);
+  }
+
+  const btns = [...document.querySelectorAll(".seg button")];
+  function setPeriod(days) {
+    btns.forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.days === days)));
+    if (!days) chart.timeScale().fitContent();
+    else chart.timeScale().setVisibleRange({ from: lastT - days * 86400, to: lastT });
+  }
+  btns.forEach(b => b.addEventListener("click", () => setPeriod(+b.dataset.days)));
+  $("tSw").addEventListener("change", e => { show.sw = e.target.checked; draw(); });
+  $("tBox").addEventListener("change", e => { show.box = e.target.checked; draw(); });
+  $("tOb").addEventListener("change", e => { show.ob = e.target.checked; draw(); });
+  $("tPoiL").addEventListener("change", e => { show.poiL = e.target.checked; draw(); });
+  $("tPoiS").addEventListener("change", e => { show.poiS = e.target.checked; draw(); });
+  $("tTr").addEventListener("change", e => { show.tr = e.target.checked; draw(); });
+
+  const fmt = v => v.toLocaleString("en-US", { maximumFractionDigits: 1 });
+  const date = t => new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ");
+  const pill = v => v > 0 ? '<span class="pill bull">bullish</span>' : v < 0 ? '<span class="pill bear">bearish</span>' : '<span class="pill neu">neutral</span>';
+  function readout(i) {
+    const c = C[i];
+    $("readout").innerHTML = `<span><b>${date(c[0])}</b> UTC</span><span>O <b>${fmt(c[1])}</b></span><span>H <b>${fmt(c[2])}</b></span>` +
+      `<span>L <b>${fmt(c[3])}</b></span><span>C <b>${fmt(c[4])}</b></span><span>LTF ${pill(D.ltf[i])}</span>`;
+  }
+  chart.subscribeCrosshairMove(p => readout((p.time != null ? tIdx.get(p.time) : undefined) ?? C.length - 1));
+  readout(C.length - 1);
+
+  const st = side => { const t = D.trades.filter(x => x[6] != null && (side === 0 || x[0] === side)), sum = t.reduce((a, x) => a + x[6], 0);
+    return `${t.length} trades, ${t.length ? Math.round(t.filter(x => x[6] > 0).length / t.length * 100) : 0}% win, ${sum >= 0 ? "+" : ""}${sum.toFixed(1)}R`; };
+  $("trStats").textContent = `Long: ${st(1)}. Short: ${st(-1)}.`;
+
+  draw();
+  setPeriod(91);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+  new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>

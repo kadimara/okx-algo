@@ -5,6 +5,7 @@ Signal candles (what the trend, structure and VWAP are calculated on):
   "index" -> OKX index price + volume aggregated across exchanges (aggregate_volume.py)
   "perp"  -> OKX perpetual price + its own volume (matches TradingView's
              OKX:BTCUSDT.P chart, useful to compare with the Pine strategy)
+  "usdc"  -> OKX <coin>/USDC spot price + its own volume (TradingView's OKX:BTCUSDC)
 Trade candles: always the OKX perpetual (BTC/USDT:USDT), where orders are filled.
 """
 from datetime import date
@@ -17,7 +18,7 @@ import pandas as pd
 from aggregate_volume import build_aggregated
 from market_data import fetch_candles
 
-SIGNAL_KINDS = ("index", "perp")
+SIGNAL_KINDS = ("index", "perp", "usdc")
 
 
 def perp_symbol(base: str) -> str:
@@ -33,6 +34,9 @@ def fetch_signal(kind: str, base: str, timeframe: str, since_ms: int,
                  exchanges: Optional[str] = None, verbose: bool = False) -> pd.DataFrame:
     if kind == "perp":
         return fetch_perp(base, timeframe, since_ms, verbose)
+    if kind == "usdc":
+        okx = ccxt.okx({"enableRateLimit": True})
+        return fetch_candles(okx, f"{base}/USDC", timeframe, since_ms, verbose=verbose)
     if kind == "index":
         df, report = build_aggregated(base, timeframe, since_ms=since_ms, exchanges=exchanges,
                                       price="okx-index", verbose=verbose)
