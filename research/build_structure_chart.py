@@ -231,17 +231,18 @@ def bias_bar(trend, breaks):
 
 
 t_idx = {t: i for i, t in enumerate(T)}
-legs, leg_levels, _, _ = leg_swings(sig, LEG_N, MIN_LEG)
+legs, leg_levels, hind_bias, _ = leg_swings(sig, LEG_N, MIN_LEG)
 live_trend, live_breaks, swing_start = live_structure(sig, LEG_N, MIN_LEG)
 leg_bias = bias_bar(live_trend, live_breaks)
 
 
 # Supply zones: every 8-candle swing high (the base swings of the legs, as confirmed live). Zone = the full range of the candle that made
 # the high. Live, no hindsight: a zone shows from the first close at which (1) its swing high is confirmed, (2) the
-# trend is bearish (a bearish CHoCH or a downtrend) and (3) it is still alive. It ends at the first candle that trades
-# back into it after price left it (a high below it), at a higher high, or when a newer leg high settles (the next
-# swing starts: zones only count for the current swing). [tShow, tEnd (None = still active), top, bottom]
-def supply_zones(df, n, trend, start):
+# bias bar is bearish (red: a confirmed downtrend, not a grey CHoCH) and (3) it is still alive. It ends at the first
+# candle that trades back into it after price left it (a high below it), at a higher high, when the bias stops being
+# bearish, or when a newer leg high settles (the next swing starts: zones only count for the current swing). The box is drawn from the swing-high candle itself.
+# [tCandle, tEnd (None = still active), top, bottom]
+def supply_zones(df, n, bias, start):
     H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
     out = []
     for t, ty, price, conf in swing_events(df, n):
@@ -250,21 +251,22 @@ def supply_zones(df, n, trend, start):
         j, c = t_idx[t], t_idx[conf]
         top, bot, left, shown, end = H[j], L[j], False, None, None
         for k in range(j + 1, len(df)):
-            if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t):
+            if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t)                     or (shown is not None and bias[k] > -1):
                 end = k
                 break
             left = left or H[k] < bot
-            if shown is None and k >= c and trend[k] < 0:
+            if shown is None and k >= c and bias[k] <= -1:
                 shown = k
         if shown is not None:
-            out.append([T[shown], None if end is None else T[end], round(top, 1), round(bot, 1)])
+            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1)])
     return out
 
 
-supply = supply_zones(sig, LEG_N, live_trend, swing_start)
+supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
 
 data = {"supply": supply, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
-        "legs": legs, "legLevels": leg_levels, "legBias": leg_bias, "legN": LEG_N, "minLeg": MIN_LEG}
+        "legs": legs, "legLevels": leg_levels, "legBias": [int(b) for b in hind_bias],   # bias bar: hindsight trend (supply zones use the live bias)
+        "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")

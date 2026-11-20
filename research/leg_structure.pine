@@ -5,8 +5,9 @@
 //    `minLeg` % is removed again and again (merge_legs), then the structure runs over those legs (structure)
 //  - bias strip: green / red = confirmed trend, grey = CHoCH open (until the first BoS of the new trend; a CHoCH
 //    that fails turns back to the old colour)
-//  - supply zones: range of each swing-high candle, shown from the close it became known in a bearish trend, ended
-//    when price trades back in after leaving it, at a higher high, or when a newer leg high settles
+//  - supply zones: range of each swing-high candle, drawn from that candle once it is known while the bias is
+//    bearish (red); ended when price trades back in after leaving it, at a higher high, when the bias stops being
+//    bearish, or when a newer leg high settles
 //  - leg swings / MSB / BoS levels are drawn as they look now (like the chart page)
 //@version=6
 indicator("Leg Structure (live)", shorttitle = "Leg Structure", overlay = true, max_bars_back = 5000,
@@ -334,7 +335,7 @@ if nZ > 0
     for idx = nZ - 1 to 0
         Zone z = zones.get(idx)
         if bar_index > z.piv
-            if high > z.top or (z.left and high >= z.bot) or (not na(swStart) and swStart > z.piv)
+            if high > z.top or (z.left and high >= z.bot) or (not na(swStart) and swStart > z.piv) or (not na(z.bx) and bias > -1)
                 if not na(z.bx)
                     z.bx.set_right(bar_index)
                     z.bx.set_extend(extend.none)
@@ -342,8 +343,8 @@ if nZ > 0
                 zones.remove(idx)
             else
                 z.left := z.left or high < z.bot
-                if na(z.bx) and liveTrend < 0 and showSz
-                    z.bx := box.new(bar_index, z.top, bar_index, z.bot, border_color = na,
+                if na(z.bx) and bias <= -1 and showSz
+                    z.bx := box.new(z.piv, z.top, bar_index, z.bot, border_color = na,
                          bgcolor = color.new(cSz, 75), extend = extend.right)
 
 // ---------------------------------------------------------------- leg swings, levels and bias box (as they look now)

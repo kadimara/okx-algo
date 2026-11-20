@@ -78,12 +78,12 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   <div class="chart-box">
     <div class="readout" id="readout"></div>
     <div id="chart"></div>
-    <div class="strip-key">Bias bar: trend of the selected swing set (green bullish, red bearish, grey neutral). Legs %: as it was at each close, no hindsight (only swings confirmed by then). Grey after a CHoCH until the new trend makes its first BoS; a CHoCH that fails (price breaks back first) turns back to the old trend's colour from that close. RSI 14: Wilder RSI of the candle closes (≥ 70 overbought, ≤ 30 oversold)</div>
+    <div class="strip-key">Bias bar: trend of the selected swing set (green bullish, red bearish, grey neutral). Legs %: with hindsight, the trend of the leg swings as drawn now (a candle's colour can change once later swings are confirmed). Supply zones use the live bias (no hindsight) instead. RSI 14: Wilder RSI of the candle closes (≥ 70 overbought, ≤ 30 oversold)</div>
   </div>
 
   <div class="legend">
     <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Faded = internal swing: on the 2-day set a swing made at a break (not a real pivot); on the leg set a swing inside the range that broke no structure.</div>
-    <div><code>▭</code> Supply zones: the candle that made each 8-candle swing high, its full range. No hindsight: a box starts at the close where the zone became known (swing high confirmed, trend bearish: a bearish CHoCH or downtrend) and ends at the first candle that trades back into it after price left it, at a higher high, or when a newer leg high settles (zones only count for the current swing). Zones touched before they were known are not drawn. Bright boxes running to the right edge are still untouched.</div>
+    <div><code>▭</code> Supply zones: the candle that made each 8-candle swing high, its full range. A box is drawn from that candle and only for zones that became known live (swing high confirmed) while the live bias (no hindsight) is bearish and before they were touched; it ends at the first candle that trades back into it after price left it, at a higher high, when the bias stops being bearish, or when a newer leg high settles (zones only count for the current swing). Zones touched before they were known are not drawn. Bright boxes running to the right edge are still untouched.</div>
     <div><code>┄</code> MSB / BoS: dotted lines at the current structure levels of the selected set (BoS = the last structural extreme, MSB = the swing that turns the trend when closed through). A close through the MSB line shifts the structure (against the trend); a close through the BoS line continues it. The bias bar follows the selected swing set.</div>
   </div>
 </div>
