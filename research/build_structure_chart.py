@@ -11,6 +11,7 @@ REPO = str(Path(__file__).resolve().parent.parent)   # the okx-algo repo root
 sys.path.insert(0, REPO)
 sys.path.insert(0, str(Path(__file__).parent))
 
+import numpy as np
 import pandas as pd
 
 from run_backtest_ms import build_parser, make_strategy
@@ -241,24 +242,60 @@ leg_bias = bias_bar(live_trend, live_breaks)
 # bias bar is bearish (red: a confirmed downtrend, not a grey MSS) and (3) it is still alive. It ends at the first
 # candle that trades back into it after price left it (a high below it), at a higher high, when the bias stops being
 # bearish, or when a newer leg high settles (the next swing starts: zones only count for the current swing). The box is drawn from the swing-high candle itself.
-# [tCandle, tEnd (None = still active), top, bottom]
+# Sharp move down: within SHARP_K candles after the swing-high candle, a low at least SHARP_ATR x ATR(14) (Wilder, as of that
+# candle) below the zone bottom. A sharp zone counts as known from the later of the confirmation and the candle that completes the drop (no hindsight).
+# Zones at a LH (the top of a pullback of at least MIN_LEG % after the leg low, below the previous leg high; leg swings known at confirmation)
+# get looser rules: no bearish bias needed (shown from confirmation, not ended by the bias) and touches before
+# confirmation do not count. The other end rules (touch after it is known, higher high, newer leg high) still apply.
+# [tCandle, tEnd (None = still active), top, bottom, sharp (1/0), at a LH (1/0)]
+SHARP_K, SHARP_ATR = 6, 1.0
+
+
+def wilder_atr(df, length=14):
+    H, L, C = (df[k].to_numpy(float) for k in ("high", "low", "close"))
+    tr = np.maximum(H, np.r_[C[0], C[:-1]]) - np.minimum(L, np.r_[C[0], C[:-1]])
+    return pd.Series(tr).ewm(alpha=1 / length, adjust=False).mean().to_numpy()
+
+
+def is_lower_high(ev, conf_i, t, price, c):
+    """Zone at the high: in the leg swings known at the close of candle c, the last leg swing before the swing high
+    at t is a low (the high is the top of the pullback after the low) and the leg high before that is higher (a LH)."""
+    known = ev[:bisect.bisect_right(conf_i, c)][-240:]
+    known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
+    prev = [p for p in merge_legs(known[-120:], MIN_LEG) if p[0] < t]
+    if not prev or prev[-1][1] != "l" or (price / prev[-1][2] - 1) * 100 < MIN_LEG:
+        return False                                           # no full leg (>= MIN_LEG %) up from the low into it
+    highs = [p for p in prev if p[1] == "h"]
+    return bool(highs) and price < highs[-1][2]
+
+
 def supply_zones(df, n, bias, start):
     H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
+    atr = wilder_atr(df)
+    ev = swing_events(df, n)
+    conf_i = [t_idx[p[3]] for p in ev]
     out = []
-    for t, ty, price, conf in swing_events(df, n):
+    for t, ty, price, conf in ev:
         if ty != "h":
             continue
         j, c = t_idx[t], t_idx[conf]
+        lh = is_lower_high(ev, conf_i, t, price, c)            # looser rules for a zone at a LH (see above)
+        hit = np.flatnonzero(L[j + 1:j + 1 + SHARP_K] <= L[j] - SHARP_ATR * atr[j])
+        sharp = hit.size > 0                                   # else drawn grey
+        if sharp:
+            c = max(c, j + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
         top, bot, left, shown, end = H[j], L[j], False, None, None
         for k in range(j + 1, len(df)):
-            if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t)                     or (shown is not None and bias[k] > -1):
+            if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
+                    or (shown is not None and not lh and bias[k] > -1):
                 end = k
                 break
-            left = left or H[k] < bot
-            if shown is None and k >= c and bias[k] <= -1:
+            if not lh or k >= c:                               # at a LH, touches before it is known do not count
+                left = left or H[k] < bot
+            if shown is None and k >= c and (lh or bias[k] <= -1):
                 shown = k
         if shown is not None:
-            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1)])
+            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh)])
     return out
 
 
@@ -270,4 +307,4 @@ data = {"supply": supply, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": l
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{len(supply)} supply zones ({sum(z[1] is None for z in supply)} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")

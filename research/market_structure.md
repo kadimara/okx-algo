@@ -112,7 +112,9 @@ Internal swings are drawn faded.
 ## 7. Supply zones (chart)
 
 - **The zone:** each 8-candle swing high, as confirmed live, spanning the full high-to-low range of the candle that made the high.
+- **Sharp move down:** only zones price left sharply: within 6 candles after the zone candle, a low at least 1 × ATR(14) (Wilder, as of the zone candle) below the zone bottom (`SHARP_K`, `SHARP_ATR`). A red zone only counts as known from the later of the swing-high confirmation and the candle that completes the drop, so it adds no hindsight. About 57 % of the zones pass (138 of 243 over the last 2 years); the chart draws the others in grey (toggle "No sharp move").
 - **When it is drawn:** the box starts at that candle. It is only drawn if the zone became known while the live bias was bearish (red, not grey), and before price traded back into it.
+- **Zones at a LH (looser rules):** a swing high that is the top of a pullback of at least `MIN_LEG` % up from the leg low, and below the previous leg high (leg swings as known at its confirmation). It is drawn from its confirmation whatever the bias, does not end when the bias changes, and touches before the confirmation do not count. The other end rules still apply. Over the last 2 years this raises the zones from 243 to 404 (277 at a LH).
 - **When it ends:** at the first of these:
   - the first candle that trades back into it after price left it;
   - a higher high;
