@@ -401,6 +401,23 @@ supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
 # [tCandle, tEnd (None = still active), top, bottom, sharp (1/0), at a HL (1/0)]
 
 
+# Demand zones are only kept at a HL (DEMAND_HL_ONLY) that came after a HH (DEMAND_AFTER_HH: on the 8-candle swings
+# known at the confirmation, the swing high between the previous low and the zone's low is above the high before it).
+# Supply zones have no such filter (their best trades are at the top of a pullback, a local HH).
+DEMAND_HL_ONLY, DEMAND_AFTER_HH = True, True
+
+
+def after_hh(ev, conf_i, t, c):
+    """Whether, on the 8-candle swings known at the close of candle c (a swing replaced by a more extreme one dropped),
+    the swing high just before the swing low at t is higher than the swing high before that (a HH came first)."""
+    known = ev[:bisect.bisect_right(conf_i, c)][-40:]
+    known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
+    pos = next((k for k, p in enumerate(known) if p[0] == t and p[1] == "l"), None)
+    if pos is None or pos < 3:
+        return False
+    return known[pos - 1][2] > known[pos - 3][2]
+
+
 def is_higher_low(ev, conf_i, t, price, c):
     """Mirror of is_lower_high: the last leg swing before the swing low at t is a high at least MIN_LEG % above it,
     and the leg low before that is lower (a HL)."""
@@ -438,6 +455,9 @@ def demand_zones(df, n, bias, start):
             continue
         j, c = t_idx[t], t_idx[conf]
         hl = is_higher_low(ev, conf_i, t, price, c)
+        ahh = after_hh(ev, conf_i, t, c)
+        if (DEMAND_HL_ONLY and not hl) or (DEMAND_AFTER_HH and not ahh):
+            continue
         top, bot = H[j], L[j]
         hit = np.flatnonzero(H[j + 1:j + 1 + SHARP_K] >= max(top + SHARP_ATR * atr[j], top * (1 + DEMAND_MIN_PCT / 100)))
         sharp = hit.size > 0
@@ -447,7 +467,7 @@ def demand_zones(df, n, bias, start):
             top = max(min(O[j], C[j]), bot * (1 + MIN_ZONE / 100))
         shown, end = demand_life(L, j, c, top, bot, t, bias, start, hl, need_bias=not hl or LH_BIAS)
         if shown is not None and (sharp or DRAW_GREY):
-            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(hl)])
+            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(hl), int(ahh)])
     return out
 
 

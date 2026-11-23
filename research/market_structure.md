@@ -125,6 +125,8 @@ Internal swings are drawn faded.
 
 The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
 
+- **Only at a HL after a HH** (since 23 Nov 2026, `DEMAND_HL_ONLY`, `DEMAND_AFTER_HH`): the zone's swing low must be a HL (see below), and on the 8-candle swings known at its confirmation the swing high just before it must be above the swing high before that. In the 4-year backtest these longs won 50-56 %; demand zones at a new LL, or after a LH, lost. Supply zones have no such filter.
+
 - **The zone:** each 8-candle swing low, as confirmed live, spanning the full range of the candle that made the low. A candle taller than 1 % gives only its lower wick: from the low up to the body low (the lower of open and close), at least 0.5 % tall.
 - **Very sharp move up:** within 4 candles a high at least 2 × ATR(14) above the candle high. Zones without it are not drawn.
 - **When it is drawn:** from the first close at which it is known (swing low confirmed, rise made) while the live bias is bullish (green, not a grey MSS), and before price traded back into it.
