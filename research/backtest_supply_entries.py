@@ -33,7 +33,7 @@ src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="u
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
-    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS", "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_SHARP_K", "DEMAND_COUNTER_MSS_ENDS", "DEMAND_SOFT"}:
+    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS", "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_SHARP_K", "DEMAND_COUNTER_MSS_ENDS"}:
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)
@@ -41,7 +41,6 @@ df = pd.read_csv(files[-1], index_col=0, parse_dates=True)
 ns["ts"] = ts = lambda t: int(pd.Timestamp(t).timestamp())
 ns["T"] = T = [ts(t) for t in df.index]
 ns["t_idx"] = t_idx = {t: i for i, t in enumerate(T)}
-ns["DEMAND_SOFT"] = False   # the visual-only demand zones without the quick rise are never traded
 H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
 
 trend, breaks, start = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"])

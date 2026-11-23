@@ -27,7 +27,7 @@ from structure import analyze_bos_structure, bos_pivot_list
 src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="utf-8")
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 SETTINGS = {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS",
-            "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_SHARP_K", "DEMAND_COUNTER_MSS_ENDS", "DEMAND_SOFT"}
+            "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_SHARP_K", "DEMAND_COUNTER_MSS_ENDS"}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
     if isinstance(node, ast.FunctionDef) or names & SETTINGS:
@@ -38,7 +38,6 @@ df = pd.read_csv(files[-1], index_col=0, parse_dates=True)
 ns["ts"] = ts = lambda t: int(pd.Timestamp(t).timestamp())
 ns["T"] = T = [ts(t) for t in df.index]
 ns["t_idx"] = t_idx = {t: i for i, t in enumerate(T)}
-ns["DEMAND_SOFT"] = False   # the visual-only demand zones without the quick rise are never traded
 ns["TFH"] = 1
 O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
 trend, breaks, start, start_low = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"], low_start=True)

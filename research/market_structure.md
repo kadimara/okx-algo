@@ -135,8 +135,6 @@ The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
 
 **Bias for the zones (since 23 Nov 2026, per side):** supply zones are shown in a bearish trend or a pending bearish MSS (bias bar red or faded red, `SUPPLY_MSS_OK = True`); demand zones in a bullish trend or a pending bullish MSS (green or faded green, `DEMAND_MSS_OK = True`). A zone ends when the bias leaves that set (`COUNTER_MSS_ENDS = True`). The chart's bias bar shows this live bias (it was the hindsight trend).
 
-- **HL without impulse** (`DEMAND_SOFT`, dashed green, visual only): demand zones at a HL that meet every demand rule except the quick rise, as in a grinding uptrend. Not traded: in `backtest_demand.py` dropping the rise requirement doubles the drawdown.
-
 ## 8. Research notes
 
 - **Continuation:** a trend makes one more MSB about 50% of the time. SMA filters and other swing sizes don't change that (see `ms_research_summary.md`).
