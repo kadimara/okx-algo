@@ -133,10 +133,6 @@ The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
 
 **Bias for the zones (since 23 Nov 2026, `MSS_OK = True`):** a pending MSS in the zone's direction counts as the right bias: supply zones are shown in a bearish trend or a bearish MSS (bias bar red or faded red), demand zones in a bullish trend or a bullish MSS (green or faded green), and end when that stops. The chart's bias bar now shows this live bias (it was the hindsight trend).
 
-## 7c. Retest zones (chart, dashed)
-
-A level tested twice, without the sharp-move rule (`retest_zones`): a new 8-candle swing low within 0.5 % (`RETEST_PCT`) of an earlier swing low from the last 10 days (`RETEST_DAYS`), with a bounce of at least 1.5 % (`RETEST_BOUNCE`) between them and no low below the level in between. Zone = from the lower of the two lows up to the higher body low of the two candles, at least 0.5 % and at most 1 % tall, drawn from the first test. Known at the second low's confirmation; shown, ended and filtered like a demand zone (bullish bias or bullish MSS; ended by a touch after price left it, a lower low, the bias turning, or a newer leg low). The next test is the trade. Supply mirrored with two swing highs.
-
 ## 8. Research notes
 
 - **Continuation:** a trend makes one more MSB about 50% of the time. SMA filters and other swing sizes don't change that (see `ms_research_summary.md`).
