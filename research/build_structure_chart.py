@@ -237,18 +237,21 @@ live_trend, live_breaks, swing_start = live_structure(sig, LEG_N, MIN_LEG)
 leg_bias = bias_bar(live_trend, live_breaks)
 
 
-# Supply zones: every 8-candle swing high (the base swings of the legs, as confirmed live). Zone = the full range of the candle that made
-# the high. Live, no hindsight: a zone shows from the first close at which (1) its swing high is confirmed, (2) the
+# Supply zones: every 8-candle swing high (the base swings of the legs, as confirmed live). Zone = the base at the high: the
+# swing-high candle plus the small candles next to it (body at most BASE_BODY of their range; first the ones after it,
+# then before it), at most BASE_MAX candles and together no taller than BASE_ATR x ATR. Top = the swing high, bottom =
+# the lowest low of the base. BASE_MAX = 1 gives the old zones (the range of the swing-high candle only). Live, no hindsight: a zone shows from the first close at which (1) its swing high is confirmed, (2) the
 # bias bar is bearish (red: a confirmed downtrend, not a grey MSS) and (3) it is still alive. It ends at the first
 # candle that trades back into it after price left it (a high below it), at a higher high, when the bias stops being
-# bearish, or when a newer leg high settles (the next swing starts: zones only count for the current swing). The box is drawn from the swing-high candle itself.
-# Sharp move down: within SHARP_K candles after the swing-high candle, a low at least SHARP_ATR x ATR(14) (Wilder, as of that
-# candle) below the zone bottom. A sharp zone counts as known from the later of the confirmation and the candle that completes the drop (no hindsight).
+# bearish, or when a newer leg high settles (the next swing starts: zones only count for the current swing). The box is drawn from the first base candle.
+# Very sharp move down: within SHARP_K candles after the base, a low at least SHARP_ATR x ATR(14) (Wilder, as of the
+# swing-high candle) below the zone bottom; else the zone is grey. A sharp zone counts as known from the later of the confirmation and the candle that completes the drop (no hindsight).
 # Zones at a LH (the top of a pullback of at least MIN_LEG % after the leg low, below the previous leg high; leg swings known at confirmation)
 # get looser rules: no bearish bias needed (shown from confirmation, not ended by the bias) and touches before
 # confirmation do not count. The other end rules (touch after it is known, higher high, newer leg high) still apply.
-# [tCandle, tEnd (None = still active), top, bottom, sharp (1/0), at a LH (1/0)]
-SHARP_K, SHARP_ATR = 6, 1.0
+# [tSwingHigh, tEnd (None = still active), top, bottom, sharp (1/0), at a LH (1/0), tFirstBaseCandle]
+SHARP_K, SHARP_ATR = 4, 2.0
+BASE_MAX, BASE_BODY, BASE_ATR = 4, 0.5, 1.5
 
 
 def wilder_atr(df, length=14):
@@ -270,7 +273,8 @@ def is_lower_high(ev, conf_i, t, price, c):
 
 
 def supply_zones(df, n, bias, start):
-    H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
+    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    small = np.abs(C - O) <= BASE_BODY * (H - L)
     atr = wilder_atr(df)
     ev = swing_events(df, n)
     conf_i = [t_idx[p[3]] for p in ev]
@@ -280,12 +284,21 @@ def supply_zones(df, n, bias, start):
             continue
         j, c = t_idx[t], t_idx[conf]
         lh = is_lower_high(ev, conf_i, t, price, c)            # looser rules for a zone at a LH (see above)
-        hit = np.flatnonzero(L[j + 1:j + 1 + SHARP_K] <= L[j] - SHARP_ATR * atr[j])
+        a = b = j                                              # the base: first and last candle
+        for step in (1, -1):                                   # small candles after the high, then before it
+            while b - a + 1 < BASE_MAX:
+                k = b + 1 if step > 0 else a - 1
+                if not (0 <= k < len(df)) or not small[k] or H[j] - min(L[a:b + 1].min(), L[k]) > BASE_ATR * atr[j]:
+                    break
+                a, b = min(a, k), max(b, k)
+        top, bot = H[j], L[a:b + 1].min()
+        hit = np.flatnonzero(L[b + 1:b + 1 + SHARP_K] <= bot - SHARP_ATR * atr[j])
         sharp = hit.size > 0                                   # else drawn grey
+        c = max(c, b)
         if sharp:
-            c = max(c, j + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
-        top, bot, left, shown, end = H[j], L[j], False, None, None
-        for k in range(j + 1, len(df)):
+            c = max(c, b + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
+        left, shown, end = False, None, None
+        for k in range(b + 1, len(df)):
             if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
                     or (shown is not None and not lh and bias[k] > -1):
                 end = k
@@ -295,71 +308,17 @@ def supply_zones(df, n, bias, start):
             if shown is None and k >= c and (lh or bias[k] <= -1):
                 shown = k
         if shown is not None:
-            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh)])
+            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh), T[a]])
     return out
 
 
 supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
 
-# Variant without the swing rule: base supply zones (leg-in, base, leg-out), rally-base-drop and drop-base-drop.
-# - leg-in: the candle before the base has a body of at least LEG_BODY of its range (either direction)
-# - base: 1 to BASE_MAX candles with a body of at most BASE_BODY of their range, together no taller than BASE_ATR x ATR
-# - leg-out: the candle after the base is bearish with a body of at least LEG_BODY of its range and bigger than the
-#   leg-in body (a stronger move out than in)
-# Zone = the full range of the base candles, drawn from the first base candle. Known at the close of the leg-out
-# candle; sharp (red) when within SHARP_K candles after the base a low is at least SHARP_ATR x ATR below the zone
-# (then known once that low is made), else grey. Shown and ended like a normal swing-high zone: shown at the first
-# close it is known with a bearish live bias, and not if price traded back into it before that; ended by a touch
-# after price left it, a high above it, the bias stopping being bearish or a newer leg high settling.
-# [tBase, tEnd (None = still active), top, bottom, sharp (1/0), 0 (no LH rule), "R" | "D" (rally / drop into the base)]
-BASE_MAX, BASE_BODY, LEG_BODY, BASE_ATR = 6, 0.5, 0.6, 1.5
 
-
-def base_supply_zones(df, bias, start):
-    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
-    atr = wilder_atr(df)
-    body, rng = np.abs(C - O), np.maximum(H - L, 1e-9)
-    small, big = body <= BASE_BODY * rng, body >= LEG_BODY * rng
-    out, i = [], 1
-    while i < len(df) - 1:
-        if not (small[i] and big[i - 1]):
-            i += 1
-            continue
-        b1 = i
-        while b1 + 1 < len(df) and small[b1 + 1] and b1 - i < BASE_MAX - 1:
-            b1 += 1
-        o = b1 + 1                                           # leg-out candle
-        top, bot, a = H[i:o].max(), L[i:o].min(), atr[i - 1]
-        if o >= len(df) or not (big[o] and C[o] < O[o] and body[o] > body[i - 1]) or top - bot > BASE_ATR * a:
-            i = b1 + 1
-            continue
-        c = o
-        hit = np.flatnonzero(L[o:o + SHARP_K] <= bot - SHARP_ATR * a)
-        sharp = hit.size > 0
-        if sharp:
-            c = o + int(hit[0])
-        t, left, shown, end = T[i], False, None, None
-        for k in range(o, len(df)):
-            if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
-                    or (shown is not None and bias[k] > -1):
-                end = k
-                break
-            left = left or H[k] < bot
-            if shown is None and k >= c and bias[k] <= -1:
-                shown = k
-        if shown is not None:
-            out.append([t, None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), 0,
-                        "R" if C[i - 1] > O[i - 1] else "D"])
-        i = o
-    return out
-
-
-supply_base = base_supply_zones(sig, leg_bias, swing_start)
-
-data = {"supply": supply, "supplyBase": supply_base, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
+data = {"supply": supply, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
         "legs": legs, "legLevels": leg_levels, "legBias": [int(b) for b in hind_bias],   # bias bar: hindsight trend (supply zones use the live bias)
         "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(supply_base)} base zones ({sum(z[4] for z in supply_base)} sharp, {sum(z[6] == 'R' for z in supply_base)} rally-base-drop),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")

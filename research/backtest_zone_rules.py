@@ -1,5 +1,6 @@
-"""Compare the two supply-zone rules of the chart: swing-high zones (supply_zones) and base zones without the swing
-rule (base_supply_zones, leg-in / base / leg-out), with the same short trades.
+"""Compare supply-zone rules of the chart (supply_zones in build_structure_chart.py) with the same short trades:
+"old" = the range of the swing-high candle, sharp = 1 ATR within 6 candles; "new" = the base at the swing high (as in
+the build script), very sharp = 2 ATR within 4 candles; plus the two in-between mixes.
 
 Red zones only (a sharp move down after the zone). The sell limit rests from the first touch of a drawn zone (known
 live while the bias was bearish) until it fills or the zone is cancelled (bias no longer bearish, a newer leg high).
@@ -7,7 +8,6 @@ Entries: "zone" = the zone bottom, "mid" = the middle of the zone. Stop just abo
 Targets: "drop low" = the low of the drop away from the zone before the fill (trades under MIN_RR R skipped, as in
 backtest_supply_entries.py), "2R" = a fixed 2R target.
 Conservative fills: on the fill candle only the stop counts; a candle that hits both stop and target is a loss.
-Base zones are also split by whether a swing-high zone overlaps them (same price range, starts within 8 candles).
 
 Usage: python research/backtest_zone_rules.py   (newest BTC 1h index file in data/)
 """
@@ -41,14 +41,13 @@ O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
 
 trend, breaks, start = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"])
 bias = ns["bias_bar"](trend, breaks)
-ZONES = {"swing high": ns["supply_zones"](df, ns["LEG_N"], bias, start),
-         "base": ns["base_supply_zones"](df, bias, start)}
+RULES = {"old: candle, 1 ATR / 6c": (1, 6, 1.0), "base, 1 ATR / 6c": (ns["BASE_MAX"], 6, 1.0),
+         "candle, 2 ATR / 4c": (1, 4, 2.0), "new: base, 2 ATR / 4c": (ns["BASE_MAX"], ns["SHARP_K"], ns["SHARP_ATR"])}
+ZONES = {}
+for name, (ns["BASE_MAX"], ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
+    ZONES[name] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
 
 MIN_RR, FEE = 2, 0.05     # FEE in % per side
-
-
-def overlaps(z, others, gap=8 * 3600):
-    return any(abs(o[0] - z[0]) <= gap and o[3] < z[2] and o[2] > z[3] for o in others)
 
 
 def run(zones, entry, target):
@@ -105,10 +104,6 @@ for target in ("drop low", "2R"):
         for rule, zs in ZONES.items():
             d, sk = run(zs, entry, target)
             print(line(f"{rule} / {entry} / {target}", d, sk))
-            if rule == "base" and len(d):
-                ov = d["zone"].apply(lambda z: overlaps(z, red["swing high"]))
-                print(line("   base, also a swing zone", d[ov]))
-                print(line("   base only (new zones)", d[~ov]))
         print()
 print("1R % = median stop distance; tgt R = median target in R; win / avg R / total R after fees, open trades left out;"
       "\nopen = still running at the end of the data.")
