@@ -72,7 +72,6 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       </label>
       <label><input type="checkbox" id="tSz" checked><span class="sw" style="background:var(--down)"></span>Supply zones</label>
       <label><input type="checkbox" id="tDz" checked><span class="sw" style="background:var(--up)"></span>Demand zones</label>
-      <label><input type="checkbox" id="tRg" checked><span class="sw box" style="background:var(--muted)"></span>Ranges</label>
       <label><input type="checkbox" id="tLv" checked><span class="sw" style="background:var(--muted)"></span>MSS / MSB lines</label>
     </div>
   </div>
@@ -87,7 +86,6 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Legs, live (default): the leg swings as the live bias and the zones saw them, each labelled as in the last rebuild of the legs it was part of, so swings that later legs merged away still show. Legs, hindsight: the final legs (legs under the minimum % removed with hindsight). Faded = internal swing: on the 2-day set a swing made at a break (not a real pivot); on the leg sets a swing inside the range that broke no structure.</div>
     <div><code>▭</code> Supply zones: the candle that made each 8-candle swing high, its full range (a candle taller than 1% only its upper wick: from the high down to the body high, at least 0.5% tall), only when price dropped very sharply away from it (within 4 candles a low at least 2 ATR(14) below the zone). A box is drawn from that candle and only for zones that became known live (swing high confirmed) while the live bias (no hindsight) is bearish and before they were touched; it ends at the first candle that trades back into it after price left it, at a higher high, when the bias stops being bearish, or when a newer leg high settles (zones only count for the current swing). Zones touched before they were known are not drawn. Zones at a LH (the top of a pullback of at least the minimum leg % after the leg low, below the previous leg high) also need the bearish bias, but touches before the swing high is confirmed do not count. Bright boxes running to the right edge are still untouched.</div>
     <div><code>▭</code> Demand zones (green): the same rules mirrored. The candle that made each 8-candle swing low (a candle taller than 1% only its lower wick: from the low up to the body low, at least 0.5% tall), only when price rose very sharply away from it (within 4 candles a high at least 2 ATR(14) above the candle). Drawn while the live bias is bullish and before price traded back into it; ended at the first candle that trades back into it after price left it, at a lower low, when the bias stops being bullish, or when a newer leg low settles. Zones at a HL (the bottom of a pullback below the previous leg high, above the previous leg low) also need the bias; touches before the swing low is confirmed do not count.</div>
-    <div><code>▭ range</code> Ranges (grey): indecision, detected live. A range starts when the last 3 confirmed 8-candle swings lie within a band of less than 3%, from the confirmation of the third; the band follows the last 3 swings and the range ends at the first close outside it or when a new swing widens the band past 3%. The grey background marks when the range is active: no trades then. The box covers the band from the first swing.</div>
     <div><code>┄</code> MSS / MSB: dotted lines at the current structure levels of the selected set (MSB = the last structural extreme, MSS = the swing that turns the trend when closed through). A close through the MSS line shifts the structure (against the trend); a close through the MSB line continues it. The bias bar follows the selected swing set.</div>
   </div>
 </div>
@@ -120,7 +118,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   const strip = chart.addHistogramSeries({ priceScaleId: "ltf", lastValueVisible: false, priceLineVisible: false, base: 0 });
   chart.priceScale("ltf").applyOptions({ scaleMargins: { top: 0.97, bottom: 0 } });
 
-  const show = { sw: true, low: "", set: "legs", lv: true, sz: true, szg: true, dz: true, rg: true };
+  const show = { sw: true, low: "", set: "legs", lv: true, sz: true, szg: true, dz: true };
   const bias = () => show.set === "swings" ? D.ltf : D.legBias;   // the bias bar follows the selected swing set
   // MSS / MSB: dotted lines from the latest swing high and low to the right edge. Bearish (last high is a LH):
   // the high is the MSS, the low the MSB; bullish mirrored.
@@ -222,42 +220,12 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       });
     }
   };
-  // Ranges: a grey background while the range is active (no trades) and a box over its band from the first swing
-  const ranges = {
-    chart: null, series: null, req: null,
-    attached(p) { this.chart = p.chart; this.series = p.series; this.req = p.requestUpdate; },
-    detached() {}, updateAllViews() {},
-    paneViews() { return [{ zOrder: () => "bottom", renderer: () => ({ draw() {}, drawBackground: t => ranges.paint(t) }) }]; },
-    paint(target) {
-      if (!show.rg || !this.chart) return;
-      const ts = this.chart.timeScale(), s = this.series, bar = ts.options().barSpacing || 6;
-      target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
-        ctx.fillStyle = ctx.strokeStyle = areas.cols.grey; ctx.lineWidth = Math.max(1, Math.round(hr));
-        ctx.font = `500 ${Math.round(10 * vr)}px ${areas.font}`; ctx.textBaseline = "bottom";
-        const x = t => t == null ? bitmapSize.width : tIdx.has(t) ? ts.logicalToCoordinate(tIdx.get(t)) : null;
-        for (const [t0, ta, t1, top, bot] of D.ranges || []) {
-          const x0 = x(t0), xa = x(ta), x1 = x(t1);
-          if (x0 == null || xa == null || x1 == null) continue;
-          const X0 = (x0 - bar / 2) * hr, XA = (xa - bar / 2) * hr, X1 = t1 == null ? x1 : x1 * hr;
-          if (X1 < 0 || X0 > bitmapSize.width) continue;
-          ctx.globalAlpha = 0.07; ctx.fillRect(XA, 0, X1 - XA, bitmapSize.height);
-          const y1 = s.priceToCoordinate(top), y2 = s.priceToCoordinate(bot);
-          if (y1 == null || y2 == null) continue;
-          ctx.globalAlpha = 0.12; ctx.fillRect(X0, y1 * vr, X1 - X0, (y2 - y1) * vr);
-          ctx.globalAlpha = 0.6; ctx.strokeRect(X0, y1 * vr, X1 - X0, (y2 - y1) * vr);
-          ctx.globalAlpha = 0.9; ctx.fillText("range", X0 + 3 * hr, y1 * vr - 2 * vr);
-        }
-        ctx.globalAlpha = 1;
-      });
-    }
-  };
-  candles.attachPrimitive(ranges);
   candles.attachPrimitive(supply);
   candles.attachPrimitive(areas);
   candles.attachPrimitive(levels);
 
   function draw() {
-    { const s = getComputedStyle(document.documentElement); areas.cols = { up: s.getPropertyValue("--up").trim(), down: s.getPropertyValue("--down").trim(), grey: s.getPropertyValue("--muted").trim() }; areas.font = s.getPropertyValue("--mono").trim(); levels.fg = s.getPropertyValue("--fg").trim(); if (areas.req) areas.req(); if (levels.req) levels.req(); if (supply.req) supply.req(); if (ranges.req) ranges.req(); }
+    { const s = getComputedStyle(document.documentElement); areas.cols = { up: s.getPropertyValue("--up").trim(), down: s.getPropertyValue("--down").trim(), grey: s.getPropertyValue("--muted").trim() }; areas.font = s.getPropertyValue("--mono").trim(); levels.fg = s.getPropertyValue("--fg").trim(); if (areas.req) areas.req(); if (levels.req) levels.req(); if (supply.req) supply.req(); }
     const k = css();
     chart.applyOptions({ layout: { background: { type: "solid", color: k.bg }, textColor: k.muted, fontFamily: k.mono, fontSize: 11 },
       crosshair: { vertLine: { color: k.muted, labelBackgroundColor: k.muted }, horzLine: { color: k.muted, labelBackgroundColor: k.muted } } });
@@ -285,7 +253,6 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   $("swSel").addEventListener("change", e => { show.set = e.target.value; draw(); readout(C.length - 1); });
   $("tSz").addEventListener("change", e => { show.sz = e.target.checked; draw(); });
   $("tDz").addEventListener("change", e => { show.dz = e.target.checked; draw(); });
-  $("tRg").addEventListener("change", e => { show.rg = e.target.checked; draw(); });
   $("tLv").addEventListener("change", e => { show.lv = e.target.checked; draw(); });
 
   const fmt = v => v.toLocaleString("en-US", { maximumFractionDigits: 1 });

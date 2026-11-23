@@ -133,10 +133,6 @@ The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
 
 **Bias for the zones (since 23 Nov 2026, per side):** supply zones are shown in a bearish trend or a pending bearish MSS (bias bar red or faded red, `SUPPLY_MSS_OK = True`); demand zones in a bullish trend or a pending bullish MSS (green or faded green, `DEMAND_MSS_OK = True`). A zone ends when the bias leaves that set (`COUNTER_MSS_ENDS = True`). The chart's bias bar shows this live bias (it was the hindsight trend).
 
-## 7d. Ranges (chart, grey)
-
-Indecision, detected live (`ranges`): a range starts when the last 3 (`RANGE_SWINGS`) confirmed 8-candle swings lie within a band of less than 3 % (`RANGE_PCT`), from the confirmation of the third. While it lasts the band follows the last 3 swings; it ends at the first close outside the band, or when a new swing makes the band wider than 3 %. While a range is active no trades are taken (backtest: an order is not filled when the candle before is in a range). On the chart: a grey background while active, and a grey box over the band from the first swing, labelled "range".
-
 ## 8. Research notes
 
 - **Continuation:** a trend makes one more MSB about 50% of the time. SMA filters and other swing sizes don't change that (see `ms_research_summary.md`).
