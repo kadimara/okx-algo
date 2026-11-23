@@ -39,8 +39,8 @@ ns["T"] = T = [ts(t) for t in df.index]
 ns["t_idx"] = t_idx = {t: i for i, t in enumerate(T)}
 O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
 
-trend, breaks, start = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"])
-bias = ns["bias_bar"](trend, breaks)
+trend, breaks, start, start_low = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"], low_start=True)
+bias = np.array(ns["bias_bar"](trend, breaks))
 RULES = {"old: 1 ATR / 6c": (6, 1.0), "new: 2 ATR / 4c": (ns["SHARP_K"], ns["SHARP_ATR"])}
 ZONES = {}
 for name, (ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
@@ -48,6 +48,11 @@ for name, (ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
     ZONES[name] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
 ns["LH_BIAS"] = True
 ZONES["new + LH needs bias"] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
+DEMAND = ns["demand_zones"](df, ns["LEG_N"], bias, start_low)     # the same rules mirrored for longs
+
+# Longs run through the same short logic on mirrored prices: high <-> -low, open / close negated, bias negated, and the
+# newer-leg-low start; a demand zone [top, bottom] becomes [-bottom, -top].
+SIDES = {"short": (H, L, O, C, bias, start), "long": (-L, -H, -O, -C, -bias, start_low)}
 
 MIN_RR, FEE, FIXED_R = 2, 0.05, 3     # FEE in % per side
 # Entry plan "plan": sell at the zone bottom, or at the body high of the zone candle when the zone-bottom stop would be
@@ -59,10 +64,13 @@ MIN_STOP, WIDE_STOP, RISK = 0.5, 1.0, 1.0
 BE_TRIGGERS = (None, 1.0, 1.5, 2.0)
 
 
-def run(zones, entry, target, be=None):
+def run(zones, entry, target, be=None, side="short"):
+    H, L, O, C, bias, start = SIDES[side]
     rows, skipped = [], 0
     for z in zones:
         t0, t1, top, bot, sharp = z[:5]
+        if side == "long":
+            top, bot = -bot, -top
         if not sharp or t1 is None:
             continue
         j, e = t_idx[t0], t_idx[t1]
@@ -70,10 +78,10 @@ def run(zones, entry, target, be=None):
             continue
         x = bot if entry == "zone" else (top + bot) / 2
         if entry == "plan":
-            x = bot if (top - bot) / bot * 100 <= WIDE_STOP else max(O[j], C[j])
+            x = bot if (top - bot) / abs(bot) * 100 <= WIDE_STOP else max(O[j], C[j])
         risk = top - x
         if entry == "plan":
-            risk = max(risk, MIN_STOP / 100 * x)
+            risk = max(risk, MIN_STOP / 100 * abs(x))
         if risk <= 0:
             continue
         stop = x + risk
@@ -101,7 +109,7 @@ def run(zones, entry, target, be=None):
                 break
             if be is not None and k > f and L[k] <= x - be * risk:
                 cur_stop, moved = x, True     # from the next candle on
-        rows.append({"time": df.index[f], "r": r, "risk_pct": risk / x * 100, "rr": rr, "zone": z,
+        rows.append({"time": df.index[f], "r": r, "risk_pct": risk / abs(x) * 100, "rr": rr, "zone": z,
                      "be": moved and r == 0})
     return pd.DataFrame(rows), skipped
 
@@ -185,3 +193,32 @@ for cur in list(ZONES)[-2:]:
             print(f"{target:>10} {name:>16} {len(g):>6} {(g['net'] > 0).mean() * 100:>4.0f}% {g['net'].mean():>+7.2f} "
                   f"{g['net'].sum() * RISK:>+7.1f}% {dd:>6.1f}% {worst:>10}   {years}")
         print()
+
+
+# Demand zones: longs with the same entry plan (entry at the zone top, stop at the zone bottom, at least MIN_STOP %),
+# no break-even, and the shorts and longs together (trades in time order, RISK % each).
+def stats(net, times):
+    eq = (1 + RISK / 100 * net).cumprod()
+    dd = (1 - eq / eq.cummax()).max() * 100
+    losing = (net < 0).astype(int)
+    worst = int(losing.groupby((losing == 0).cumsum()).sum().max())
+    years = "  ".join(f"{y}: {x.sum() * RISK:+.1f}%" for y, x in net.groupby(times.dt.year))
+    return (f"{len(net):>6} {(net > 0).mean() * 100:>4.0f}% {net.mean():>+7.2f} {net.sum() * RISK:>+7.1f}% "
+            f"{(eq.iloc[-1] - 1) * 100:>+10.1f}% {dd:>6.1f}% {worst:>10}   {years}")
+
+
+print(f"\nDemand zones (longs, {len(DEMAND)} drawn), entry plan, and shorts + longs together (supply: {cur}):")
+print(f"{'target':>10} {'trades':>23} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
+for target in ("drop low", f"{FIXED_R}R"):
+    parts = {}
+    for side, zs in (("short", ZONES[cur]), ("long", DEMAND)):
+        d, _ = run(zs, "plan", target, side=side)
+        d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
+        d["hl"] = [z[5] for z in d["zone"]]
+        parts[side] = d
+    lo = parts["long"]
+    both = pd.concat(parts.values()).sort_values("time")
+    for name, g in (("longs", lo), ("  at a HL", lo[lo["hl"] == 1]), ("  normal", lo[lo["hl"] == 0]),
+                    ("shorts", parts["short"]), ("shorts + longs", both)):
+        print(f"{target:>10} {name:>16} " + stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)))
+    print()

@@ -121,6 +121,16 @@ Internal swings are drawn faded.
   - the live bias stops being bearish;
   - a newer leg high settles (zones only count for the current swing).
 
+## 7b. Demand zones (chart)
+
+The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
+
+- **The zone:** each 8-candle swing low, as confirmed live, spanning the full range of the candle that made the low. A candle taller than 1 % gives only its lower wick: from the low up to the body low (the lower of open and close), at least 0.5 % tall.
+- **Very sharp move up:** within 4 candles a high at least 2 × ATR(14) above the candle high. Zones without it are not drawn.
+- **When it is drawn:** from the first close at which it is known (swing low confirmed, rise made) while the live bias is bullish (green, not a grey MSS), and before price traded back into it.
+- **Zones at a HL:** the bottom of a pullback of at least `MIN_LEG` % down from the leg high, above the previous leg low. Touches before the confirmation do not count; they need the bullish bias like the others (`LH_BIAS`).
+- **When it ends:** at the first of: a candle that trades back into it after price left it (a low above it first); a lower low; the live bias stops being bullish; a newer leg low settles.
+
 ## 8. Research notes
 
 - **Continuation:** a trend makes one more MSB about 50% of the time. SMA filters and other swing sizes don't change that (see `ms_research_summary.md`).

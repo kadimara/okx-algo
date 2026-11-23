@@ -181,16 +181,18 @@ def leg_swings(df, n, min_leg):
     return out, levels, st["bias"], st["breaks"]
 
 
-def live_structure(df, n, min_leg, window=120):
+def live_structure(df, n, min_leg, window=120, low_start=False):
     """Replays the leg structure close by close without hindsight: each time swings are confirmed, the legs are
     rebuilt from the last `window` confirmed swings only and the structure runs on until the next confirmation.
     Returns per candle the trend at its close, the breaks ([candle, direction, level, trend before]) and the swing
-    start (pivot time of the latest settled leg high: one with at least two leg swings after it)."""
+    start (pivot time of the latest settled leg high: one with at least two leg swings after it). With low_start also
+    the same for the latest settled leg low (for the demand zones), as a fourth value."""
     close = df["close"].to_numpy(float)
     ev = swing_events(df, n)
     conf_i = [t_idx[p[3]] for p in ev]                      # ev is in confirmation order
     events = sorted(set(conf_i))
     trend, start, breaks = [0] * len(df), [None] * len(df), []
+    start_low = [None] * len(df)
     for e, c in enumerate(events):
         c2 = events[e + 1] if e + 1 < len(events) else len(df)
         known = ev[:bisect.bisect_right(conf_i, c)][-2 * window:]
@@ -203,9 +205,11 @@ def live_structure(df, n, min_leg, window=120):
         breaks += [b for b in st["breaks"] if b[0] >= c]
         highs = [p[0] for p in P[:-2] if p[1] == "h"]
         start[c:c2] = [highs[-1] if highs else None] * (c2 - c)
+        lows = [p[0] for p in P[:-2] if p[1] == "l"]
+        start_low[c:c2] = [lows[-1] if lows else None] * (c2 - c)
     for b in breaks:
         b[3] = trend[b[0] - 1]
-    return trend, breaks, start
+    return (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
 
 
 def bias_bar(trend, breaks):
@@ -233,7 +237,7 @@ def bias_bar(trend, breaks):
 
 t_idx = {t: i for i, t in enumerate(T)}
 legs, leg_levels, hind_bias, _ = leg_swings(sig, LEG_N, MIN_LEG)
-live_trend, live_breaks, swing_start = live_structure(sig, LEG_N, MIN_LEG)
+live_trend, live_breaks, swing_start, swing_start_low = live_structure(sig, LEG_N, MIN_LEG, low_start=True)
 leg_bias = bias_bar(live_trend, live_breaks)
 
 
@@ -319,10 +323,74 @@ def zone_life(H, j, c, top, bot, t, bias, start, lh=False, need_bias=True):
 supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
 
 
-data = {"supply": supply, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
+# Demand zones: the supply-zone rules mirrored for longs. Every 8-candle swing low; zone = the full range of that candle
+# (a candle taller than WIDE_ZONE % only its lower wick: from the low up to the body low, at least MIN_ZONE % tall).
+# Very sharp move up: within SHARP_K candles a high at least SHARP_ATR x ATR above the candle high (else not kept, like
+# DRAW_GREY). Shown from the first close it is known with a bullish live bias (bias bar green) and before price traded
+# back into it; ended at the first candle that trades back into it after price left it (a low above it), a lower low,
+# when the bias stops being bullish, or when a newer leg low settles. Zones at a HL (the bottom of a pullback of at
+# least MIN_LEG % down from the leg high, above the previous leg low): touches before the confirmation do not count,
+# and with LH_BIAS they need the bias like the others.
+# [tCandle, tEnd (None = still active), top, bottom, sharp (1/0), at a HL (1/0)]
+
+
+def is_higher_low(ev, conf_i, t, price, c):
+    """Mirror of is_lower_high: the last leg swing before the swing low at t is a high at least MIN_LEG % above it,
+    and the leg low before that is lower (a HL)."""
+    known = ev[:bisect.bisect_right(conf_i, c)][-240:]
+    known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
+    prev = [p for p in merge_legs(known[-120:], MIN_LEG) if p[0] < t]
+    if not prev or prev[-1][1] != "h" or (1 - price / prev[-1][2]) * 100 < MIN_LEG:
+        return False
+    lows = [p for p in prev if p[1] == "l"]
+    return bool(lows) and price > lows[-1][2]
+
+
+def demand_life(L, j, c, top, bot, t, bias, start, hl=False, need_bias=True):
+    """Mirror of zone_life for a demand zone: (shown, end) candle indices."""
+    left, shown = False, None
+    for k in range(j + 1, len(L)):
+        if L[k] < bot or (left and L[k] <= top) or (start[k] is not None and start[k] > t) \
+                or (shown is not None and need_bias and bias[k] < 1):
+            return shown, k
+        if not hl or k >= c:
+            left = left or L[k] > top
+        if shown is None and k >= c and (not need_bias or bias[k] >= 1):
+            shown = k
+    return shown, None
+
+
+def demand_zones(df, n, bias, start):
+    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    atr = wilder_atr(df)
+    ev = swing_events(df, n)
+    conf_i = [t_idx[p[3]] for p in ev]
+    out = []
+    for t, ty, price, conf in ev:
+        if ty != "l":
+            continue
+        j, c = t_idx[t], t_idx[conf]
+        hl = is_higher_low(ev, conf_i, t, price, c)
+        top, bot = H[j], L[j]
+        hit = np.flatnonzero(H[j + 1:j + 1 + SHARP_K] >= top + SHARP_ATR * atr[j])
+        sharp = hit.size > 0
+        if sharp:
+            c = max(c, j + 1 + int(hit[0]))
+        if (top - bot) / bot * 100 > WIDE_ZONE:                # a wide candle: the zone is its lower wick
+            top = max(min(O[j], C[j]), bot * (1 + MIN_ZONE / 100))
+        shown, end = demand_life(L, j, c, top, bot, t, bias, start, hl, need_bias=not hl or LH_BIAS)
+        if shown is not None and (sharp or DRAW_GREY):
+            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(hl)])
+    return out
+
+
+demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low)
+
+
+data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
         "legs": legs, "legLevels": leg_levels, "legBias": [int(b) for b in hind_bias],   # bias bar: hindsight trend (supply zones use the live bias)
         "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(demand)} demand zones,", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
