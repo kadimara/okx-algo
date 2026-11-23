@@ -68,7 +68,9 @@ for hrs in LOWER_HOURS:
 # Leg swings (matched to a hand-labelled TradingView chart): the 8-candle break structure, then the smallest
 # leg under MIN_LEG % is removed again and again (the pair goes, the more extreme neighbour of each side stays)
 # until every leg is at least MIN_LEG %. The last leg is still forming and is never removed.
-LEG_N, MIN_LEG = 8, 2.5
+# LEG_RULE "pct": a leg must be at least MIN_LEG % of the swing price. "retrace": a leg must retrace at least RETRACE %
+# of the leg before it (after a LH -> LL drop the next high only counts when the bounce is >= RETRACE % of that drop).
+LEG_N, MIN_LEG, LEG_RULE, RETRACE = 8, 2.5, "pct", 10.0
 # STRUCT_MODE: "structural" = breaks of the structural high / low (the levels that turn or continue the trend, see
 # structure); "swing" = breaks of the most recent swing high / low (a close above the last swing high is bullish, below
 # the last swing low bearish). Both on the same leg swings; MSS / MSB and the bias bar work the same.
@@ -89,8 +91,10 @@ def swing_events(df, n):
 
 
 def merge_legs(P, min_leg):
-    """Remove the smallest leg under min_leg % again and again (ties: the leftmost); the first and last swing always
-    stay. A heap of legs over a linked list (same result as rebuilding the list after each removal, much faster)."""
+    """Remove the smallest leg that is too small again and again (ties: the leftmost); the first and last swing always
+    stay. Too small: under min_leg % of the swing price (LEG_RULE "pct"), or under RETRACE % of the leg before it
+    (LEG_RULE "retrace"; the size is then the ratio to the leg before). A heap of legs over a linked list (same result
+    as rebuilding the list after each removal, much faster)."""
     Q = []                                         # alternate first: of two swings of the same type the more extreme stays
     for p in P:
         if Q and Q[-1][1] == p[1]:
@@ -102,25 +106,51 @@ def merge_legs(P, min_leg):
     if n < 4:
         return Q
     nxt, prv, alive = list(range(1, n + 1)), list(range(-1, n - 1)), [True] * n
-    pct = lambda a, b: abs(Q[b][2] - Q[a][2]) / Q[a][2] * 100
-    heap = [(pct(i, i + 1), i, i + 1) for i in range(1, n - 2) if pct(i, i + 1) < min_leg]
+    if LEG_RULE == "retrace":
+        lim = RETRACE
+
+        def size(a, b):
+            back = abs(Q[a][2] - Q[prv[a]][2])
+            return abs(Q[b][2] - Q[a][2]) / back * 100 if back else float("inf")
+    else:
+        lim = min_leg
+        size = lambda a, b: abs(Q[b][2] - Q[a][2]) / Q[a][2] * 100
+    heap = [(size(i, i + 1), i, i + 1) for i in range(1, n - 2) if size(i, i + 1) < lim]
     heapq.heapify(heap)
     while heap:
-        _, a, b = heapq.heappop(heap)
+        w, a, b = heapq.heappop(heap)
         if not (alive[a] and alive[b] and nxt[a] == b) or prv[a] < 0 or nxt[b] >= n:
             continue                                # stale, or an end of the leg is the first / last swing
+        cur = size(a, b)
+        if cur != w:                                # the leg before changed (retrace rule): re-queue with the new size
+            if cur < lim:
+                heapq.heappush(heap, (cur, a, b))
+            continue
         l, r = prv[a], nxt[b]
         alive[a] = alive[b] = False
         nxt[l], prv[r] = r, l
-        if prv[l] >= 0 and r < n - 1:              # the new leg l -> r
-            w = pct(l, r)
-            if w < min_leg:
-                heapq.heappush(heap, (w, l, r))
+        for x, y in ((l, r), (r, nxt[r])):         # the new leg l -> r; with the retrace rule also r -> next (bigger leg before)
+            if prv[x] >= 0 and y < n - 1 and alive[x]:
+                v = size(x, y)
+                if v < lim:
+                    heapq.heappush(heap, (v, x, y))
+            if LEG_RULE != "retrace":
+                break
     out, i = [], 0
     while i < n:
         out.append(Q[i])
         i = nxt[i]
     return out
+
+
+def leg_big_enough(prev, price):
+    """Is the leg from the last leg swing in prev to price a full leg (LEG_RULE: >= MIN_LEG % or >= RETRACE % of the
+    leg before)?"""
+    if LEG_RULE == "retrace":
+        if len(prev) < 2:
+            return False
+        return abs(price - prev[-1][2]) >= RETRACE / 100 * abs(prev[-1][2] - prev[-2][2])
+    return abs(price / prev[-1][2] - 1) * 100 >= MIN_LEG
 
 
 def structure(close, P, i0, i1):
@@ -372,7 +402,7 @@ def _is_lower_high(ev, conf_i, t, price, c):
     known = ev[:bisect.bisect_right(conf_i, c)][-240:]
     known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
     prev = [p for p in merge_legs(known[-120:], MIN_LEG) if p[0] < t]
-    if not prev or prev[-1][1] != "l" or (price / prev[-1][2] - 1) * 100 < MIN_LEG:
+    if not prev or prev[-1][1] != "l" or not leg_big_enough(prev, price):
         return False                                           # no full leg (>= MIN_LEG %) up from the low into it
     highs = [p for p in prev if p[1] == "h"]
     return bool(highs) and price < highs[-1][2]
@@ -467,7 +497,7 @@ def _is_higher_low(ev, conf_i, t, price, c):
     known = ev[:bisect.bisect_right(conf_i, c)][-240:]
     known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
     prev = [p for p in merge_legs(known[-120:], MIN_LEG) if p[0] < t]
-    if not prev or prev[-1][1] != "h" or (1 - price / prev[-1][2]) * 100 < MIN_LEG:
+    if not prev or prev[-1][1] != "h" or not leg_big_enough(prev, price):
         return False
     lows = [p for p in prev if p[1] == "l"]
     return bool(lows) and price > lows[-1][2]
