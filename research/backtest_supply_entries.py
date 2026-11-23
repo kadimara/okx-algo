@@ -33,7 +33,7 @@ src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="u
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
-    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT"}:
+    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "MSS_OK"}:
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)

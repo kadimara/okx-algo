@@ -79,7 +79,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   <div class="chart-box">
     <div class="readout" id="readout"></div>
     <div id="chart"></div>
-    <div class="strip-key">Bias bar: trend of the selected swing set (green bullish, red bearish, grey neutral). Legs %: with hindsight, the trend of the leg swings as drawn now (a candle's colour can change once later swings are confirmed). Supply zones use the live bias (no hindsight) instead. RSI 14: Wilder RSI of the candle closes (≥ 70 overbought, ≤ 30 oversold)</div>
+    <div class="strip-key">Bias bar: trend of the selected swing set (green bullish, red bearish, grey neutral). Legs %: the live bias, as known at each close (no hindsight): solid green / red = a confirmed trend, faded green / red = a bullish / bearish MSS that its first MSB has not confirmed yet. The zones use this bias: longs in green or faded green, shorts in red or faded red. RSI 14: Wilder RSI of the candle closes (≥ 70 overbought, ≤ 30 oversold)</div>
   </div>
 
   <div class="legend">
@@ -230,7 +230,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     chart.applyOptions({ layout: { background: { type: "solid", color: k.bg }, textColor: k.muted, fontFamily: k.mono, fontSize: 11 },
       crosshair: { vertLine: { color: k.muted, labelBackgroundColor: k.muted }, horzLine: { color: k.muted, labelBackgroundColor: k.muted } } });
     candles.applyOptions({ upColor: k.up, downColor: k.down, wickUpColor: k.up, wickDownColor: k.down });
-    strip.setData(T.map((t, i) => ({ time: t, value: 1, color: bias()[i] >= 1 ? k.up : bias()[i] <= -1 ? k.down : k.line })));
+    strip.setData(T.map((t, i) => { const b = bias()[i];
+      return { time: t, value: 1, color: b >= 1 ? k.up : b <= -1 ? k.down : b > 0 ? k.upSoft : b < 0 ? k.downSoft : k.line }; }));
 
     const m = [];
     if (show.sw) for (const [t, ty, lab, , , internal] of D[show.set]) {

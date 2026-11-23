@@ -260,6 +260,9 @@ WIDE_ZONE, MIN_ZONE = 1.0, 0.5
 # LH_BIAS: zones at a LH also need the bearish live bias (shown only then, ended when it stops); they keep the rule that
 # touches before the swing high is confirmed do not count. False = the looser LH rules (no bias needed).
 LH_BIAS = True
+# MSS_OK: a pending MSS in the zone's direction counts as the right bias (bias bar faded: -0.5 bearish MSS for supply,
+# +0.5 bullish MSS for demand), so zones at the start of a reversal are shown before the first MSB confirms it.
+MSS_OK = True
 # Minimum size of the sharp move in % beyond the zone candle (on top of SHARP_ATR x ATR): in quiet markets 2 ATR can be
 # only ~1 %, which does not look sharp. 0 = ATR only.
 SUPPLY_MIN_PCT, DEMAND_MIN_PCT = 0.0, 1.5
@@ -314,11 +317,11 @@ def zone_life(H, j, c, top, bot, t, bias, start, lh=False, need_bias=True):
     left, shown = False, None
     for k in range(j + 1, len(H)):
         if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
-                or (shown is not None and need_bias and bias[k] > -1):
+                or (shown is not None and need_bias and bias[k] > -(0.5 if MSS_OK else 1)):
             return shown, k
         if not lh or k >= c:                                   # at a LH, touches before it is known do not count
             left = left or H[k] < bot
-        if shown is None and k >= c and (not need_bias or bias[k] <= -1):
+        if shown is None and k >= c and (not need_bias or bias[k] <= -(0.5 if MSS_OK else 1)):
             shown = k
     return shown, None
 
@@ -354,11 +357,11 @@ def demand_life(L, j, c, top, bot, t, bias, start, hl=False, need_bias=True):
     left, shown = False, None
     for k in range(j + 1, len(L)):
         if L[k] < bot or (left and L[k] <= top) or (start[k] is not None and start[k] > t) \
-                or (shown is not None and need_bias and bias[k] < 1):
+                or (shown is not None and need_bias and bias[k] < (0.5 if MSS_OK else 1)):
             return shown, k
         if not hl or k >= c:
             left = left or L[k] > top
-        if shown is None and k >= c and (not need_bias or bias[k] >= 1):
+        if shown is None and k >= c and (not need_bias or bias[k] >= (0.5 if MSS_OK else 1)):
             shown = k
     return shown, None
 
@@ -391,7 +394,7 @@ demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low)
 
 
 data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
-        "legs": legs, "legLevels": leg_levels, "legBias": [int(b) for b in hind_bias],   # bias bar: hindsight trend (supply zones use the live bias)
+        "legs": legs, "legLevels": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
         "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
