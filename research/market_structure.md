@@ -120,6 +120,7 @@ Internal swings are drawn faded.
   - a higher high;
   - the live bias stops being bearish;
   - a newer leg high settles (zones only count for the current swing).
+- **Zones at sharp drops** (`drop_zones`, dashed on the chart): any local high that is not an 8-candle swing high (a high above the `DROP_PIVOT` = 2 candles on each side), followed by the same very sharp drop (2 × ATR within 4 candles). The candle's full range; known at the later of the pivot confirmation and the candle that completes the drop; shown and ended like the swing-high zones (bearish live bias needed, no looser LH rule).
 
 ## 8. Research notes
 
