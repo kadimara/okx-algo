@@ -250,6 +250,9 @@ leg_bias = bias_bar(live_trend, live_breaks)
 # [tCandle, tEnd (None = still active), top, bottom, sharp (1/0), at a LH (1/0)]
 SHARP_K, SHARP_ATR = 4, 2.0
 DRAW_GREY = False     # zones without the very sharp drop (grey on the chart): off for now
+# A zone candle taller than WIDE_ZONE % becomes its upper wick: from the high down to the body high (max of open and
+# close), but at least MIN_ZONE % tall. The sharp-drop test still uses the candle low.
+WIDE_ZONE, MIN_ZONE = 1.0, 0.5
 
 
 def wilder_atr(df, length=14):
@@ -271,7 +274,7 @@ def is_lower_high(ev, conf_i, t, price, c):
 
 
 def supply_zones(df, n, bias, start):
-    H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
+    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
     atr = wilder_atr(df)
     ev = swing_events(df, n)
     conf_i = [t_idx[p[3]] for p in ev]
@@ -286,6 +289,8 @@ def supply_zones(df, n, bias, start):
         sharp = hit.size > 0                                   # else drawn grey
         if sharp:
             c = max(c, j + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
+        if (top - bot) / bot * 100 > WIDE_ZONE:                # a wide candle: the zone is its upper wick
+            bot = min(max(O[j], C[j]), top / (1 + MIN_ZONE / 100))
         shown, end = zone_life(H, j, c, top, bot, t, bias, start, lh)
         if shown is not None and (sharp or DRAW_GREY):
             out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh)])
