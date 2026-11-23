@@ -6,7 +6,7 @@ Red zones only (a sharp move down after the zone). The sell limit rests from the
 live while the bias was bearish) until it fills or the zone is cancelled (bias no longer bearish, a newer leg high).
 Entries: "zone" = the zone bottom, "mid" = the middle of the zone. Stop just above the zone top, so 1R = top - entry.
 Targets: "drop low" = the low of the drop away from the zone before the fill (trades under MIN_RR R skipped, as in
-backtest_supply_entries.py), "2R" = a fixed 2R target.
+backtest_supply_entries.py), "3R" = a fixed FIXED_R (3R) target.
 Conservative fills: on the fill candle only the stop counts; a candle that hits both stop and target is a loss.
 
 Usage: python research/backtest_zone_rules.py   (newest BTC 1h index file in data/)
@@ -46,7 +46,7 @@ ZONES = {}
 for name, (ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
     ZONES[name] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
 
-MIN_RR, FEE = 2, 0.05     # FEE in % per side
+MIN_RR, FEE, FIXED_R = 2, 0.05, 3     # FEE in % per side
 
 
 def run(zones, entry, target):
@@ -71,7 +71,7 @@ def run(zones, entry, target):
                 break                         # cancelled before a fill
         if f is None:
             continue
-        lo = L[j + 1:f].min() if target == "drop low" else x - 2 * risk
+        lo = L[j + 1:f].min() if target == "drop low" else x - FIXED_R * risk
         rr = (x - lo) / risk
         if rr < MIN_RR - 1e-9:
             skipped += 1
@@ -98,7 +98,7 @@ print(f"Data {df.index[0]:%Y-%m-%d} .. {df.index[-1]:%Y-%m-%d} ({len(df)} candle
       + ", ".join(f"{k} {len(v)}" for k, v in red.items()) + f". Fee {FEE}% per side.\n")
 print(f"{'rule / entry / target':<34} {'trades':>6} {'skipped':>8} {'1R %':>7} {'tgt R':>8} {'win':>6} {'avg R':>8} "
       f"{'total R':>9} {'open':>5}")
-for target in ("drop low", "2R"):
+for target in ("drop low", f"{FIXED_R}R"):
     for entry in ("zone", "mid"):
         for rule, zs in ZONES.items():
             d, sk = run(zs, entry, target)
