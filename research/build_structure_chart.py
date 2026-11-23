@@ -301,10 +301,64 @@ def supply_zones(df, n, bias, start):
 
 supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
 
-data = {"supply": supply, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
+# Variant without the swing rule: base supply zones (leg-in, base, leg-out), rally-base-drop and drop-base-drop.
+# - leg-in: the candle before the base has a body of at least LEG_BODY of its range (either direction)
+# - base: 1 to BASE_MAX candles with a body of at most BASE_BODY of their range, together no taller than BASE_ATR x ATR
+# - leg-out: the candle after the base is bearish with a body of at least LEG_BODY of its range
+# Zone = the full range of the base candles, drawn from the first base candle. Known at the close of the leg-out
+# candle; sharp (red) when within SHARP_K candles after the base a low is at least SHARP_ATR x ATR below the zone
+# (then known once that low is made), else grey. Shown and ended like a normal swing-high zone: shown at the first
+# close it is known with a bearish live bias, and not if price traded back into it before that; ended by a touch
+# after price left it, a high above it, the bias stopping being bearish or a newer leg high settling.
+# [tBase, tEnd (None = still active), top, bottom, sharp (1/0), 0 (no LH rule), "R" | "D" (rally / drop into the base)]
+BASE_MAX, BASE_BODY, LEG_BODY, BASE_ATR = 6, 0.5, 0.6, 1.5
+
+
+def base_supply_zones(df, bias, start):
+    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    atr = wilder_atr(df)
+    body, rng = np.abs(C - O), np.maximum(H - L, 1e-9)
+    small, big = body <= BASE_BODY * rng, body >= LEG_BODY * rng
+    out, i = [], 1
+    while i < len(df) - 1:
+        if not (small[i] and big[i - 1]):
+            i += 1
+            continue
+        b1 = i
+        while b1 + 1 < len(df) and small[b1 + 1] and b1 - i < BASE_MAX - 1:
+            b1 += 1
+        o = b1 + 1                                           # leg-out candle
+        top, bot, a = H[i:o].max(), L[i:o].min(), atr[i - 1]
+        if o >= len(df) or not (big[o] and C[o] < O[o]) or top - bot > BASE_ATR * a:
+            i = b1 + 1
+            continue
+        c = o
+        hit = np.flatnonzero(L[o:o + SHARP_K] <= bot - SHARP_ATR * a)
+        sharp = hit.size > 0
+        if sharp:
+            c = o + int(hit[0])
+        t, left, shown, end = T[i], False, None, None
+        for k in range(o, len(df)):
+            if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
+                    or (shown is not None and bias[k] > -1):
+                end = k
+                break
+            left = left or H[k] < bot
+            if shown is None and k >= c and bias[k] <= -1:
+                shown = k
+        if shown is not None:
+            out.append([t, None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), 0,
+                        "R" if C[i - 1] > O[i - 1] else "D"])
+        i = o
+    return out
+
+
+supply_base = base_supply_zones(sig, leg_bias, swing_start)
+
+data = {"supply": supply, "supplyBase": supply_base, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
         "legs": legs, "legLevels": leg_levels, "legBias": [int(b) for b in hind_bias],   # bias bar: hindsight trend (supply zones use the live bias)
         "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(supply_base)} base zones ({sum(z[4] for z in supply_base)} sharp, {sum(z[6] == 'R' for z in supply_base)} rally-base-drop),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
