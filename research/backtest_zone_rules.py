@@ -303,7 +303,9 @@ EVS = ns["swing_events"](df, ns["LEG_N"])
 EV_C = [t_idx[p[3]] for p in EVS]
 
 
-def pullback(z, side):
+def pattern(z, side):
+    """The swings before the zone's swing, as known at its confirmation: (x0, prev, x1, cur) or None. Short: L0, H_prev,
+    L1, H (the zone); long: H0, L_prev, H1, L."""
     t = z[0]
     j = next((k for k, p in enumerate(EVS) if p[0] == t and p[1] == ("h" if side == "short" else "l")), None)
     if j is None:
@@ -312,11 +314,27 @@ def pullback(z, side):
     known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
     pos = next((k for k, p in enumerate(known) if p[0] == t), None)
     if pos is None or pos < 3:
+        return None
+    return known[pos - 3:pos + 1]
+
+
+def pullback(z, side):
+    """Short: the zone is a local HH with no LL in between (L1 > L0 and H > H_prev); long mirrored."""
+    q = pattern(z, side)
+    if q is None:
         return False
-    x0, prev, x1, cur = known[pos - 3:pos + 1]      # short: L0, H_prev, L1, H (the zone) / long: H0, L_prev, H1, L
-    if side == "short":
-        return cur[2] > prev[2] and x1[2] > x0[2]
-    return cur[2] < prev[2] and x1[2] < x0[2]
+    x0, prev, x1, cur = q
+    return cur[2] > prev[2] and x1[2] > x0[2] if side == "short" else cur[2] < prev[2] and x1[2] < x0[2]
+
+
+def after_break(z, side):
+    """Short: a LL came before the zone (the swing low between the previous high and the zone is below the low before
+    that: L1 < L0); long: a HH came before it (H1 > H0)."""
+    q = pattern(z, side)
+    if q is None:
+        return False
+    x0, prev, x1, cur = q
+    return x1[2] < x0[2] if side == "short" else x1[2] > x0[2]
 
 
 print("\nPullback zones (short: a local HH with no LL in between; long: a local LL with no HH), entry plan, target drop low:")
@@ -330,8 +348,10 @@ for bname, mss in (("confirmed", False), ("MSS too", True)):
         d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
         d["hl"] = [z[5] for z in d["zone"]]
         d["pb"] = [pullback(z, side) for z in d["zone"]]
+        d["ab"] = [after_break(z, side) for z in d["zone"]]
         parts[side] = d
-    for fname, keep in (("all", lambda d: d), ("only pullback", lambda d: d[d["pb"]]), ("no pullback", lambda d: d[~d["pb"]])):
+    for fname, keep in (("all", lambda d: d), ("only pullback", lambda d: d[d["pb"]]), ("no pullback", lambda d: d[~d["pb"]]),
+                          ("only after LL / HH", lambda d: d[d["ab"]])):
         sh, lo = keep(parts["short"]), keep(parts["long"])
         for name, g in (("shorts", sh), ("longs at a HL", lo[lo["hl"] == 1]), ("longs normal", lo[lo["hl"] == 0]),
                         ("all", pd.concat([sh, lo]).sort_values("time"))):
