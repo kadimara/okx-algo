@@ -260,9 +260,9 @@ WIDE_ZONE, MIN_ZONE = 1.0, 0.5
 # LH_BIAS: zones at a LH also need the bearish live bias (shown only then, ended when it stops); they keep the rule that
 # touches before the swing high is confirmed do not count. False = the looser LH rules (no bias needed).
 LH_BIAS = True
-# MSS_OK: a pending MSS in the zone's direction counts as the right bias (bias bar faded: -0.5 bearish MSS for supply,
+# SUPPLY_MSS_OK / DEMAND_MSS_OK: a pending MSS in the zone's direction counts as the right bias (bias bar faded: -0.5 bearish MSS for supply,
 # +0.5 bullish MSS for demand), so zones at the start of a reversal are shown before the first MSB confirms it.
-MSS_OK = True
+SUPPLY_MSS_OK, DEMAND_MSS_OK = True, False   # per side: shorts also in a bearish MSS, longs only in a confirmed uptrend
 # COUNTER_MSS_ENDS: a shown zone ends when the bias leaves its side, also for a pending MSS against it (often from a
 # small internal break). False = only a confirmed opposite trend ends it (supply: bias +1, demand: bias -1).
 COUNTER_MSS_ENDS = True
@@ -320,11 +320,11 @@ def zone_life(H, j, c, top, bot, t, bias, start, lh=False, need_bias=True):
     left, shown = False, None
     for k in range(j + 1, len(H)):
         if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
-                or (shown is not None and need_bias and (bias[k] > -(0.5 if MSS_OK else 1) if COUNTER_MSS_ENDS else bias[k] >= 1)):
+                or (shown is not None and need_bias and (bias[k] > -(0.5 if SUPPLY_MSS_OK else 1) if COUNTER_MSS_ENDS else bias[k] >= 1)):
             return shown, k
         if not lh or k >= c:                                   # at a LH, touches before it is known do not count
             left = left or H[k] < bot
-        if shown is None and k >= c and (not need_bias or bias[k] <= -(0.5 if MSS_OK else 1)):
+        if shown is None and k >= c and (not need_bias or bias[k] <= -(0.5 if SUPPLY_MSS_OK else 1)):
             shown = k
     return shown, None
 
@@ -360,11 +360,11 @@ def demand_life(L, j, c, top, bot, t, bias, start, hl=False, need_bias=True):
     left, shown = False, None
     for k in range(j + 1, len(L)):
         if L[k] < bot or (left and L[k] <= top) or (start[k] is not None and start[k] > t) \
-                or (shown is not None and need_bias and (bias[k] < (0.5 if MSS_OK else 1) if COUNTER_MSS_ENDS else bias[k] <= -1)):
+                or (shown is not None and need_bias and (bias[k] < (0.5 if DEMAND_MSS_OK else 1) if COUNTER_MSS_ENDS else bias[k] <= -1)):
             return shown, k
         if not hl or k >= c:
             left = left or L[k] > top
-        if shown is None and k >= c and (not need_bias or bias[k] >= (0.5 if MSS_OK else 1)):
+        if shown is None and k >= c and (not need_bias or bias[k] >= (0.5 if DEMAND_MSS_OK else 1)):
             shown = k
     return shown, None
 

@@ -29,7 +29,7 @@ src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="u
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
-    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "MSS_OK", "COUNTER_MSS_ENDS"}:
+    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS"}:
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)
@@ -41,7 +41,7 @@ O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
 
 trend, breaks, start, start_low = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"], low_start=True)
 bias = np.array(ns["bias_bar"](trend, breaks))
-ns["MSS_OK"] = False      # the earlier sections: confirmed trend only (as before)
+ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = False      # the earlier sections: confirmed trend only (as before)
 RULES = {"old: 1 ATR / 6c": (6, 1.0), "new: 2 ATR / 4c": (ns["SHARP_K"], ns["SHARP_ATR"])}
 ZONES = {}
 for name, (ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
@@ -49,14 +49,15 @@ for name, (ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
     ZONES[name] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
 ns["LH_BIAS"] = True
 ZONES["new + LH needs bias"] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
-# Shorts and longs with the confirmed trend only (MSS_OK False) or also in a pending MSS their way (MSS_OK True)
-# (MSS_OK, COUNTER_MSS_ENDS): confirmed trend only / MSS their way allowed / and a counter MSS does not end the zone
-VARIANTS = {"Confirmed trend only": (False, True), "Confirmed trend or a pending MSS their way": (True, True),
-            "MSS their way allowed, a counter MSS does not end the zone (only a confirmed opposite trend)": (True, False)}
+# Shorts and longs with the confirmed trend only or also in a pending MSS their way (per side)
+# (SUPPLY_MSS_OK, DEMAND_MSS_OK, COUNTER_MSS_ENDS)
+VARIANTS = {"Confirmed trend only": (False, False, True), "Confirmed trend or a pending MSS their way": (True, True, True),
+            "MSS their way allowed, a counter MSS does not end the zone (only a confirmed opposite trend)": (True, True, False),
+            "Chart default: shorts also in a bearish MSS, longs only in a confirmed uptrend": (True, False, True)}
 BOTH = {}
-for name, (ns["MSS_OK"], ns["COUNTER_MSS_ENDS"]) in VARIANTS.items():
+for name, (ns["SUPPLY_MSS_OK"], ns["DEMAND_MSS_OK"], ns["COUNTER_MSS_ENDS"]) in VARIANTS.items():
     BOTH[name] = (ns["supply_zones"](df, ns["LEG_N"], bias, start), ns["demand_zones"](df, ns["LEG_N"], bias, start_low))
-ns["MSS_OK"], ns["COUNTER_MSS_ENDS"] = False, True
+ns["SUPPLY_MSS_OK"], ns["DEMAND_MSS_OK"], ns["COUNTER_MSS_ENDS"] = False, False, True
 
 # Longs run through the same short logic on mirrored prices: high <-> -low, open / close negated, bias negated, and the
 # newer-leg-low start; a demand zone [top, bottom] becomes [-bottom, -top].
@@ -216,15 +217,15 @@ def stats(net, times):
 
 
 for vname, (SUP, DEMAND) in BOTH.items():
-  mss, counter = VARIANTS[vname]
-  lim = 0.5 if mss else 1
+  smss, dmss, counter = VARIANTS[vname]
+  lims = {"short": 0.5 if smss else 1, "long": 0.5 if dmss else 1}
   print(f"\n{vname}: {len(SUP)} supply / "
         f"{len(DEMAND)} demand zones (demand rise >= {ns['DEMAND_MIN_PCT']}%), entry plan:")
   print(f"{'target':>10} {'trades':>23} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
   for target in ("drop low", f"{FIXED_R}R"):
       parts = {}
       for side, zs in (("short", SUP), ("long", DEMAND)):
-          d, _ = run(zs, "plan", target, side=side, lim=lim, keep_mss=not counter)
+          d, _ = run(zs, "plan", target, side=side, lim=lims[side], keep_mss=not counter)
           d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
           d["hl"] = [z[5] for z in d["zone"]]
           parts[side] = d

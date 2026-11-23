@@ -131,7 +131,7 @@ The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
 - **Zones at a HL:** the bottom of a pullback of at least `MIN_LEG` % down from the leg high, above the previous leg low. Touches before the confirmation do not count; they need the bullish bias like the others (`LH_BIAS`).
 - **When it ends:** at the first of: a candle that trades back into it after price left it (a low above it first); a lower low; the live bias stops being bullish; a newer leg low settles.
 
-**Bias for the zones (since 23 Nov 2026, `MSS_OK = True`):** a pending MSS in the zone's direction counts as the right bias: supply zones are shown in a bearish trend or a bearish MSS (bias bar red or faded red), demand zones in a bullish trend or a bullish MSS (green or faded green), and end when that stops. The chart's bias bar now shows this live bias (it was the hindsight trend).
+**Bias for the zones (since 23 Nov 2026, per side):** supply zones are shown in a bearish trend or a pending bearish MSS (bias bar red or faded red, `SUPPLY_MSS_OK = True`); demand zones only in a confirmed bullish trend (solid green, `DEMAND_MSS_OK = False`). A zone ends when the bias leaves that set (`COUNTER_MSS_ENDS = True`). The chart's bias bar shows this live bias (it was the hindsight trend).
 
 ## 8. Research notes
 
