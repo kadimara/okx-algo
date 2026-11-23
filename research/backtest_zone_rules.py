@@ -37,6 +37,7 @@ df = pd.read_csv(files[-1], index_col=0, parse_dates=True)
 ns["ts"] = ts = lambda t: int(pd.Timestamp(t).timestamp())
 ns["T"] = T = [ts(t) for t in df.index]
 ns["t_idx"] = t_idx = {t: i for i, t in enumerate(T)}
+ns["DEMAND_HL_ONLY"] = ns["DEMAND_AFTER_HH"] = False   # this script compares all demand zones (split by HL itself)
 O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
 
 trend, breaks, start, start_low = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"], low_start=True)
