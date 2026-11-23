@@ -237,21 +237,18 @@ live_trend, live_breaks, swing_start = live_structure(sig, LEG_N, MIN_LEG)
 leg_bias = bias_bar(live_trend, live_breaks)
 
 
-# Supply zones: every 8-candle swing high (the base swings of the legs, as confirmed live). Zone = the base at the high: the
-# swing-high candle plus the small candles next to it (body at most BASE_BODY of their range; first the ones after it,
-# then before it), at most BASE_MAX candles and together no taller than BASE_ATR x ATR. Top = the swing high, bottom =
-# the lowest low of the base. BASE_MAX = 1 gives the old zones (the range of the swing-high candle only). Live, no hindsight: a zone shows from the first close at which (1) its swing high is confirmed, (2) the
+# Supply zones: every 8-candle swing high (the base swings of the legs, as confirmed live).  Zone = the full range of the candle that made
+# the high. Live, no hindsight: a zone shows from the first close at which (1) its swing high is confirmed, (2) the
 # bias bar is bearish (red: a confirmed downtrend, not a grey MSS) and (3) it is still alive. It ends at the first
 # candle that trades back into it after price left it (a high below it), at a higher high, when the bias stops being
-# bearish, or when a newer leg high settles (the next swing starts: zones only count for the current swing). The box is drawn from the first base candle.
-# Very sharp move down: within SHARP_K candles after the base, a low at least SHARP_ATR x ATR(14) (Wilder, as of the
+# bearish, or when a newer leg high settles (the next swing starts: zones only count for the current swing). The box is drawn from the swing-high candle itself.
+# Very sharp move down: within SHARP_K candles after the swing-high candle, a low at least SHARP_ATR x ATR(14) (Wilder, as of the
 # swing-high candle) below the zone bottom; else the zone is grey. A sharp zone counts as known from the later of the confirmation and the candle that completes the drop (no hindsight).
 # Zones at a LH (the top of a pullback of at least MIN_LEG % after the leg low, below the previous leg high; leg swings known at confirmation)
 # get looser rules: no bearish bias needed (shown from confirmation, not ended by the bias) and touches before
 # confirmation do not count. The other end rules (touch after it is known, higher high, newer leg high) still apply.
-# [tSwingHigh, tEnd (None = still active), top, bottom, sharp (1/0), at a LH (1/0), tFirstBaseCandle]
+# [tCandle, tEnd (None = still active), top, bottom, sharp (1/0), at a LH (1/0)]
 SHARP_K, SHARP_ATR = 4, 2.0
-BASE_MAX, BASE_BODY, BASE_ATR = 4, 0.5, 1.5
 
 
 def wilder_atr(df, length=14):
@@ -273,8 +270,7 @@ def is_lower_high(ev, conf_i, t, price, c):
 
 
 def supply_zones(df, n, bias, start):
-    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
-    small = np.abs(C - O) <= BASE_BODY * (H - L)
+    H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
     atr = wilder_atr(df)
     ev = swing_events(df, n)
     conf_i = [t_idx[p[3]] for p in ev]
@@ -284,21 +280,13 @@ def supply_zones(df, n, bias, start):
             continue
         j, c = t_idx[t], t_idx[conf]
         lh = is_lower_high(ev, conf_i, t, price, c)            # looser rules for a zone at a LH (see above)
-        a = b = j                                              # the base: first and last candle
-        for step in (1, -1):                                   # small candles after the high, then before it
-            while b - a + 1 < BASE_MAX:
-                k = b + 1 if step > 0 else a - 1
-                if not (0 <= k < len(df)) or not small[k] or H[j] - min(L[a:b + 1].min(), L[k]) > BASE_ATR * atr[j]:
-                    break
-                a, b = min(a, k), max(b, k)
-        top, bot = H[j], L[a:b + 1].min()
-        hit = np.flatnonzero(L[b + 1:b + 1 + SHARP_K] <= bot - SHARP_ATR * atr[j])
+        top, bot = H[j], L[j]
+        hit = np.flatnonzero(L[j + 1:j + 1 + SHARP_K] <= bot - SHARP_ATR * atr[j])
         sharp = hit.size > 0                                   # else drawn grey
-        c = max(c, b)
         if sharp:
-            c = max(c, b + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
+            c = max(c, j + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
         left, shown, end = False, None, None
-        for k in range(b + 1, len(df)):
+        for k in range(j + 1, len(df)):
             if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
                     or (shown is not None and not lh and bias[k] > -1):
                 end = k
@@ -308,7 +296,7 @@ def supply_zones(df, n, bias, start):
             if shown is None and k >= c and (lh or bias[k] <= -1):
                 shown = k
         if shown is not None:
-            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh), T[a]])
+            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh)])
     return out
 
 
