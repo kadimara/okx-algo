@@ -262,7 +262,7 @@ WIDE_ZONE, MIN_ZONE = 1.0, 0.5
 LH_BIAS = True
 # SUPPLY_MSS_OK / DEMAND_MSS_OK: a pending MSS in the zone's direction counts as the right bias (bias bar faded: -0.5 bearish MSS for supply,
 # +0.5 bullish MSS for demand), so zones at the start of a reversal are shown before the first MSB confirms it.
-SUPPLY_MSS_OK, DEMAND_MSS_OK = True, False   # per side: shorts also in a bearish MSS, longs only in a confirmed uptrend
+SUPPLY_MSS_OK, DEMAND_MSS_OK = True, True   # per side: shorts also in a bearish MSS, longs also in a bullish MSS
 # COUNTER_MSS_ENDS: a shown zone ends when the bias leaves its side, also for a pending MSS against it (often from a
 # small internal break). False = only a confirmed opposite trend ends it (supply: bias +1, demand: bias -1).
 COUNTER_MSS_ENDS = True
