@@ -235,3 +235,28 @@ for vname, (SUP, DEMAND) in BOTH.items():
                       ("shorts", parts["short"]), ("shorts + longs", both)):
           print(f"{target:>10} {name:>16} " + stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)))
       print()
+
+
+# Zone swing size: zones at 8-candle swings (the chart) vs 12-candle swings (12h on 1h candles). The bias, MSS and leg
+# structure stay on the LEG_N swings; only the swing highs / lows the zones come from change.
+print("\nZone swing size (bias and structure unchanged), entry plan, target drop low:")
+print(f"{'swing':>8} {'bias':>12} {'zones':>14} {'trades':>12} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
+for zn in (ns["LEG_N"], 12):
+    for bname, mss in (("confirmed", False), ("MSS too", True)):
+        ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = mss
+        SUP, DEM = ns["supply_zones"](df, zn, bias, start), ns["demand_zones"](df, zn, bias, start_low)
+        lim = 0.5 if mss else 1
+        parts = {}
+        for side, zs in (("short", SUP), ("long", DEM)):
+            d, _ = run(zs, "plan", "drop low", side=side, lim=lim)
+            d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
+            d["hl"] = [z[5] for z in d["zone"]]
+            parts[side] = d
+        lo = parts["long"]
+        both = pd.concat(parts.values()).sort_values("time")
+        for name, g in (("shorts", parts["short"]), ("longs at a HL", lo[lo["hl"] == 1]), ("longs normal", lo[lo["hl"] == 0]),
+                        ("all", both)):
+            zc = f"{len(SUP)}s/{len(DEM)}d" if name == "all" else ""
+            print(f"{zn:>7}c {bname:>12} {zc:>14} {name:>12} " + (stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)) if len(g) else "     0"))
+        print()
+ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = False
