@@ -156,20 +156,24 @@ def structure(close, P, i0, i1):
     return {"hi": hi, "lo": lo, "trend": trend, "keep": keep, "brk": brk, "breaks": breaks, "bias": bias}
 
 
-def leg_swings(df, n, min_leg):
-    """The leg swings and structure as drawn now, with hindsight (labels, current MSS / MSB)."""
-    P = merge_legs(base_swings(df, n), min_leg)
-    st = structure(df["close"].to_numpy(float), P, 0, len(df))
-    hi, lo, trend, keep, brk = st["hi"], st["lo"], st["trend"], st["keep"], st["brk"]
-    # MSB = the structural level in the trend direction, MSS = the one against it
+def structure_levels(df, P, st, end):
+    """The current MSS / MSB of a structure run on swings P up to candle end: MSB = the structural level in the trend
+    direction, MSS = the one against it (None when not set)."""
+    hi, lo, trend, brk = st["hi"], st["lo"], st["trend"], st["brk"]
     mss, msb = (hi, lo) if trend < 0 else (lo, hi)
-    mss = [P[mss][0], round(P[mss][2], 1)]
+    mss = None if mss is None else [P[mss][0], round(P[mss][2], 1)]
     if msb is None:                                         # the leg after the last break has no swing yet
-        seg = df["low" if trend < 0 else "high"].to_numpy(float)[brk:]
+        seg = df["low" if trend < 0 else "high"].to_numpy(float)[brk:end]
         j = brk + int(seg.argmin() if trend < 0 else seg.argmax())
         msb = [T[j], round(float(seg[j - brk]), 1)]
     else:
         msb = [P[msb][0], round(P[msb][2], 1)]
+    return {"trend": trend, "mss": mss, "msb": msb}
+
+
+def label_swings(P, keep):
+    """HH / LH / HL / LL for the swings P against the last structural swing of the same type; the swings outside keep
+    (they broke no structure) are internal: [pivot time, type, label, price, confirmed time, internal]."""
     out, last = [], {}
     for k, (t, ty, price, conf) in enumerate(P):
         prev = last.get(ty)
@@ -177,22 +181,31 @@ def leg_swings(df, n, min_leg):
         if k in keep:
             last[ty] = price
         out.append([t, ty, lab, round(price, 1), conf, k not in keep])
-    levels = {"trend": trend, "mss": mss, "msb": msb}
-    return out, levels, st["bias"], st["breaks"]
+    return out
 
 
-def live_structure(df, n, min_leg, window=120, low_start=False):
+def leg_swings(df, n, min_leg):
+    """The leg swings and structure as drawn now, with hindsight (labels, current MSS / MSB)."""
+    P = merge_legs(base_swings(df, n), min_leg)
+    st = structure(df["close"].to_numpy(float), P, 0, len(df))
+    return label_swings(P, st["keep"]), structure_levels(df, P, st, len(df)), st["bias"], st["breaks"]
+
+
+def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
     """Replays the leg structure close by close without hindsight: each time swings are confirmed, the legs are
     rebuilt from the last `window` confirmed swings only and the structure runs on until the next confirmation.
     Returns per candle the trend at its close, the breaks ([candle, direction, level, trend before]) and the swing
     start (pivot time of the latest settled leg high: one with at least two leg swings after it). With low_start also
-    the same for the latest settled leg low (for the demand zones), as a fourth value."""
+    the same for the latest settled leg low (for the demand zones), as a fourth value. With labels also, last, the live
+    labels and levels: every swing that was part of the live legs, labelled as in the last rebuild it was part of
+    (swings merged away later stay), and the MSS / MSB of the structure at the last candle."""
     close = df["close"].to_numpy(float)
     ev = swing_events(df, n)
     conf_i = [t_idx[p[3]] for p in ev]                      # ev is in confirmation order
     events = sorted(set(conf_i))
     trend, start, breaks = [0] * len(df), [None] * len(df), []
     start_low = [None] * len(df)
+    lab, levels = {}, None
     for e, c in enumerate(events):
         c2 = events[e + 1] if e + 1 < len(events) else len(df)
         known = ev[:bisect.bisect_right(conf_i, c)][-2 * window:]
@@ -207,9 +220,15 @@ def live_structure(df, n, min_leg, window=120, low_start=False):
         start[c:c2] = [highs[-1] if highs else None] * (c2 - c)
         lows = [p[0] for p in P[:-2] if p[1] == "l"]
         start_low[c:c2] = [lows[-1] if lows else None] * (c2 - c)
+        if labels:
+            for row in label_swings(P, st["keep"]):
+                lab[(row[0], row[1])] = row
+            if c2 == len(df):
+                levels = structure_levels(df, P, st, c2)
     for b in breaks:
         b[3] = trend[b[0] - 1]
-    return (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
+    out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
+    return out + ({"legs": sorted(lab.values()), "levels": levels},) if labels else out
 
 
 def bias_bar(trend, breaks):
@@ -237,7 +256,7 @@ def bias_bar(trend, breaks):
 
 t_idx = {t: i for i, t in enumerate(T)}
 legs, leg_levels, hind_bias, _ = leg_swings(sig, LEG_N, MIN_LEG)
-live_trend, live_breaks, swing_start, swing_start_low = live_structure(sig, LEG_N, MIN_LEG, low_start=True)
+live_trend, live_breaks, swing_start, swing_start_low, live_lab = live_structure(sig, LEG_N, MIN_LEG, low_start=True, labels=True)
 leg_bias = bias_bar(live_trend, live_breaks)
 
 
@@ -397,7 +416,8 @@ demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low)
 
 
 data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
-        "legs": legs, "legLevels": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
+        "legs": live_lab["legs"], "legLevels": live_lab["levels"],   # labels and MSS / MSB lines: the live leg swings
+        "legsHind": legs, "legLevelsHind": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
         "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
