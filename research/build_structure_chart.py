@@ -243,12 +243,13 @@ leg_bias = bias_bar(live_trend, live_breaks)
 # candle that trades back into it after price left it (a high below it), at a higher high, when the bias stops being
 # bearish, or when a newer leg high settles (the next swing starts: zones only count for the current swing). The box is drawn from the swing-high candle itself.
 # Very sharp move down: within SHARP_K candles after the swing-high candle, a low at least SHARP_ATR x ATR(14) (Wilder, as of the
-# swing-high candle) below the zone bottom; else the zone is grey. A sharp zone counts as known from the later of the confirmation and the candle that completes the drop (no hindsight).
+# swing-high candle) below the zone bottom. Only these zones are kept (DRAW_GREY = False drops the others). A sharp zone counts as known from the later of the confirmation and the candle that completes the drop (no hindsight).
 # Zones at a LH (the top of a pullback of at least MIN_LEG % after the leg low, below the previous leg high; leg swings known at confirmation)
 # get looser rules: no bearish bias needed (shown from confirmation, not ended by the bias) and touches before
 # confirmation do not count. The other end rules (touch after it is known, higher high, newer leg high) still apply.
 # [tCandle, tEnd (None = still active), top, bottom, sharp (1/0), at a LH (1/0)]
 SHARP_K, SHARP_ATR = 4, 2.0
+DRAW_GREY = False     # zones without the very sharp drop (grey on the chart): off for now
 
 
 def wilder_atr(df, length=14):
@@ -286,7 +287,7 @@ def supply_zones(df, n, bias, start):
         if sharp:
             c = max(c, j + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
         shown, end = zone_life(H, j, c, top, bot, t, bias, start, lh)
-        if shown is not None:
+        if shown is not None and (sharp or DRAW_GREY):
             out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh)])
     return out
 
@@ -306,41 +307,13 @@ def zone_life(H, j, c, top, bot, t, bias, start, lh=False):
     return shown, None
 
 
-# Zones at sharp drops (not only at the 8-candle swing highs): every local high (a high above the DROP_PIVOT candles on
-# each side) that is not an 8-candle swing high, followed by the very sharp drop (within SHARP_K candles a low at least
-# SHARP_ATR x ATR below the candle). Zone = the full range of that candle, drawn from it. Known at the later of the
-# pivot confirmation (DROP_PIVOT candles later) and the candle that completes the drop; shown and ended like a normal
-# swing-high zone (bearish live bias needed, no looser LH rule). [tCandle, tEnd (None = still active), top, bottom]
-DROP_PIVOT = 2
-
-
-def drop_zones(df, n, bias, start):
-    H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
-    atr = wilder_atr(df)
-    swing_highs = {t_idx[p[0]] for p in swing_events(df, n) if p[1] == "h"}
-    out, m = [], DROP_PIVOT
-    for j in range(m, len(df) - m):
-        if j in swing_highs or H[j] <= H[j - m:j].max() or H[j] < H[j + 1:j + 1 + m].max():
-            continue
-        top, bot = H[j], L[j]
-        hit = np.flatnonzero(L[j + 1:j + 1 + SHARP_K] <= bot - SHARP_ATR * atr[j])
-        if not hit.size:
-            continue
-        c = max(j + m, j + 1 + int(hit[0]))
-        shown, end = zone_life(H, j, c, top, bot, T[j], bias, start)
-        if shown is not None:
-            out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1)])
-    return out
-
-
 supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
-supply_drop = drop_zones(sig, LEG_N, leg_bias, swing_start)
 
 
-data = {"supply": supply, "supplyDrop": supply_drop, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
+data = {"supply": supply, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
         "legs": legs, "legLevels": leg_levels, "legBias": [int(b) for b in hind_bias],   # bias bar: hindsight trend (supply zones use the live bias)
         "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(supply_drop)} sharp-drop zones,", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")

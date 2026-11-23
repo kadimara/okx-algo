@@ -112,7 +112,7 @@ Internal swings are drawn faded.
 ## 7. Supply zones (chart)
 
 - **The zone:** each 8-candle swing high, as confirmed live, spanning the full high-to-low range of the candle that made the high.
-- **Very sharp move down:** only zones price left very sharply: within 4 candles after the zone candle, a low at least 2 × ATR(14) (Wilder, as of the swing-high candle) below the zone bottom (`SHARP_K`, `SHARP_ATR`; until 23 Nov 2026 this was 1 × ATR within 6 candles). A red zone only counts as known from the later of the swing-high confirmation and the candle that completes the drop, so it adds no hindsight. The chart draws the others in grey (toggle "No sharp move").
+- **Very sharp move down:** only zones price left very sharply: within 4 candles after the zone candle, a low at least 2 × ATR(14) (Wilder, as of the swing-high candle) below the zone bottom (`SHARP_K`, `SHARP_ATR`; until 23 Nov 2026 this was 1 × ATR within 6 candles). A red zone only counts as known from the later of the swing-high confirmation and the candle that completes the drop, so it adds no hindsight. Zones without it are not drawn for now (`DRAW_GREY`).
 - **When it is drawn:** the box starts at that candle. It is only drawn if the zone became known while the live bias was bearish (red, not grey), and before price traded back into it.
 - **Zones at a LH (looser rules):** a swing high that is the top of a pullback of at least `MIN_LEG` % up from the leg low, and below the previous leg high (leg swings as known at its confirmation). It is drawn from its confirmation whatever the bias, does not end when the bias changes, and touches before the confirmation do not count. The other end rules still apply. Over the last 2 years this raises the zones from 243 to 404 (277 at a LH).
 - **When it ends:** at the first of these:
@@ -120,7 +120,6 @@ Internal swings are drawn faded.
   - a higher high;
   - the live bias stops being bearish;
   - a newer leg high settles (zones only count for the current swing).
-- **Zones at sharp drops** (`drop_zones`, dashed on the chart): any local high that is not an 8-candle swing high (a high above the `DROP_PIVOT` = 2 candles on each side), followed by the same very sharp drop (2 × ATR within 4 candles). The candle's full range; known at the later of the pivot confirmation and the candle that completes the drop; shown and ended like the swing-high zones (bearish live bias needed, no looser LH rule).
 
 ## 8. Research notes
 

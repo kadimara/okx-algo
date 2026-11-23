@@ -71,8 +71,6 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
         <select id="swSel"><option value="legs" selected>Legs ≥ min %</option><option value="swings">2-day</option></select>
       </label>
       <label><input type="checkbox" id="tSz" checked><span class="sw" style="background:var(--down)"></span>Supply zones</label>
-      <label><input type="checkbox" id="tSzd" checked><span class="sw" style="background:var(--down);opacity:.6"></span>Zones at sharp drops</label>
-      <label><input type="checkbox" id="tSzg" checked><span class="sw" style="background:var(--muted)"></span>No sharp move (grey)</label>
       <label><input type="checkbox" id="tLv" checked><span class="sw" style="background:var(--muted)"></span>MSS / MSB lines</label>
     </div>
   </div>
@@ -85,8 +83,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
 
   <div class="legend">
     <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Faded = internal swing: on the 2-day set a swing made at a break (not a real pivot); on the leg set a swing inside the range that broke no structure.</div>
-    <div><code>▭</code> Supply zones: the candle that made each 8-candle swing high, its full range, red when price dropped very sharply away from it (within 4 candles a low at least 2 ATR(14) below the zone), grey when it did not. A box is drawn from that candle and only for zones that became known live (swing high confirmed) while the live bias (no hindsight) is bearish and before they were touched; it ends at the first candle that trades back into it after price left it, at a higher high, when the bias stops being bearish, or when a newer leg high settles (zones only count for the current swing). Zones touched before they were known are not drawn. Zones at a LH (the top of a pullback of at least the minimum leg % after the leg low, below the previous leg high) have looser rules: no bearish bias needed (they do not end when the bias changes) and touches before the swing high is confirmed do not count. Bright boxes running to the right edge are still untouched.</div>
-    <div><code>┅</code> Zones at sharp drops (dashed): any other local high (above the 2 candles on each side) that price left very sharply (within 4 candles a low at least 2 ATR below it), so also the start of a drop in the middle of a decline. The candle's full range; known once the drop is made and shown and ended like the other zones (bearish live bias needed, no looser LH rule).</div>
+    <div><code>▭</code> Supply zones: the candle that made each 8-candle swing high, its full range, only when price dropped very sharply away from it (within 4 candles a low at least 2 ATR(14) below the zone). A box is drawn from that candle and only for zones that became known live (swing high confirmed) while the live bias (no hindsight) is bearish and before they were touched; it ends at the first candle that trades back into it after price left it, at a higher high, when the bias stops being bearish, or when a newer leg high settles (zones only count for the current swing). Zones touched before they were known are not drawn. Zones at a LH (the top of a pullback of at least the minimum leg % after the leg low, below the previous leg high) have looser rules: no bearish bias needed (they do not end when the bias changes) and touches before the swing high is confirmed do not count. Bright boxes running to the right edge are still untouched.</div>
     <div><code>┄</code> MSS / MSB: dotted lines at the current structure levels of the selected set (MSB = the last structural extreme, MSS = the swing that turns the trend when closed through). A close through the MSS line shifts the structure (against the trend); a close through the MSB line continues it. The bias bar follows the selected swing set.</div>
   </div>
 </div>
@@ -119,7 +116,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   const strip = chart.addHistogramSeries({ priceScaleId: "ltf", lastValueVisible: false, priceLineVisible: false, base: 0 });
   chart.priceScale("ltf").applyOptions({ scaleMargins: { top: 0.97, bottom: 0 } });
 
-  const show = { sw: true, low: "", set: "legs", lv: true, sz: true, szg: true, szd: true };
+  const show = { sw: true, low: "", set: "legs", lv: true, sz: true, szg: true };
   const bias = () => show.set === "legs" ? D.legBias : D.ltf;   // the bias bar follows the selected swing set
   // MSS / MSB: dotted lines from the latest swing high and low to the right edge. Bearish (last high is a LH):
   // the high is the MSS, the low the MSB; bullish mirrored.
@@ -202,11 +199,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       const ts = this.chart.timeScale(), s = this.series, bar = ts.options().barSpacing || 6;
       target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
         ctx.lineWidth = Math.max(1, Math.round(hr));
-        const zs = D.supply.map(z => [...z.slice(0, 5), 0]);
-        if (show.szd) for (const z of D.supplyDrop || []) zs.push([...z, 1, 1]);
-        for (const [t0, t1, top, bot, sharp, drop] of zs) {
+        for (const [t0, t1, top, bot, sharp] of D.supply) {
           if (!sharp && !show.szg) continue;
-          ctx.setLineDash(drop ? [4 * hr, 3 * hr] : []);
           ctx.strokeStyle = ctx.fillStyle = sharp ? areas.cols.down : areas.cols.grey;
           const xa = ts.logicalToCoordinate(tIdx.get(t0)), xb = t1 == null ? null : ts.logicalToCoordinate(tIdx.get(t1));
           if (xa == null) continue;
@@ -218,7 +212,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
           ctx.globalAlpha = t1 == null ? 0.25 : 0.14; ctx.fillRect(x1, y1 * vr, x2 - x1, h);
           ctx.globalAlpha = t1 == null ? 0.9 : 0.5; ctx.strokeRect(x1, y1 * vr, x2 - x1, h);
         }
-        ctx.globalAlpha = 1; ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
       });
     }
   };
@@ -253,8 +247,6 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   $("tSw").addEventListener("change", e => { show.sw = e.target.checked; draw(); });
   $("swSel").addEventListener("change", e => { show.set = e.target.value; draw(); readout(C.length - 1); });
   $("tSz").addEventListener("change", e => { show.sz = e.target.checked; draw(); });
-  $("tSzd").addEventListener("change", e => { show.szd = e.target.checked; draw(); });
-  $("tSzg").addEventListener("change", e => { show.szg = e.target.checked; draw(); });
   $("tLv").addEventListener("change", e => { show.lv = e.target.checked; draw(); });
 
   const fmt = v => v.toLocaleString("en-US", { maximumFractionDigits: 1 });

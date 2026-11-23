@@ -1,6 +1,6 @@
 """Compare supply-zone rules of the chart (supply_zones in build_structure_chart.py) with the same short trades:
 "old" = sharp means a low 1 ATR below the zone within 6 candles; "new" = very sharp, 2 ATR within 4 candles (as in the
-build script). The zone is the range of the swing-high candle in both. Plus the zones at sharp drops (drop_zones).
+build script). The zone is the range of the swing-high candle in both.
 
 Red zones only (a sharp move down after the zone). The sell limit rests from the first touch of a drawn zone (known
 live while the bias was bearish) until it fills or the zone is cancelled (bias no longer bearish, a newer leg high).
@@ -29,7 +29,7 @@ src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="u
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
-    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DROP_PIVOT"}:
+    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY"}:
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)
@@ -45,7 +45,6 @@ RULES = {"old: 1 ATR / 6c": (6, 1.0), "new: 2 ATR / 4c": (ns["SHARP_K"], ns["SHA
 ZONES = {}
 for name, (ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
     ZONES[name] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
-ZONES["sharp-drop zones (not swing)"] = [z + [1] for z in ns["drop_zones"](df, ns["LEG_N"], bias, start)]
 
 MIN_RR, FEE = 2, 0.05     # FEE in % per side
 
