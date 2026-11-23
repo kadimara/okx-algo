@@ -304,7 +304,8 @@ supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
 # Variant without the swing rule: base supply zones (leg-in, base, leg-out), rally-base-drop and drop-base-drop.
 # - leg-in: the candle before the base has a body of at least LEG_BODY of its range (either direction)
 # - base: 1 to BASE_MAX candles with a body of at most BASE_BODY of their range, together no taller than BASE_ATR x ATR
-# - leg-out: the candle after the base is bearish with a body of at least LEG_BODY of its range
+# - leg-out: the candle after the base is bearish with a body of at least LEG_BODY of its range and bigger than the
+#   leg-in body (a stronger move out than in)
 # Zone = the full range of the base candles, drawn from the first base candle. Known at the close of the leg-out
 # candle; sharp (red) when within SHARP_K candles after the base a low is at least SHARP_ATR x ATR below the zone
 # (then known once that low is made), else grey. Shown and ended like a normal swing-high zone: shown at the first
@@ -329,7 +330,7 @@ def base_supply_zones(df, bias, start):
             b1 += 1
         o = b1 + 1                                           # leg-out candle
         top, bot, a = H[i:o].max(), L[i:o].min(), atr[i - 1]
-        if o >= len(df) or not (big[o] and C[o] < O[o]) or top - bot > BASE_ATR * a:
+        if o >= len(df) or not (big[o] and C[o] < O[o] and body[o] > body[i - 1]) or top - bot > BASE_ATR * a:
             i = b1 + 1
             continue
         c = o
