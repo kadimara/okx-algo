@@ -260,6 +260,9 @@ WIDE_ZONE, MIN_ZONE = 1.0, 0.5
 # LH_BIAS: zones at a LH also need the bearish live bias (shown only then, ended when it stops); they keep the rule that
 # touches before the swing high is confirmed do not count. False = the looser LH rules (no bias needed).
 LH_BIAS = True
+# Minimum size of the sharp move in % beyond the zone candle (on top of SHARP_ATR x ATR): in quiet markets 2 ATR can be
+# only ~1 %, which does not look sharp. 0 = ATR only.
+SUPPLY_MIN_PCT, DEMAND_MIN_PCT = 0.0, 1.5
 
 
 def wilder_atr(df, length=14):
@@ -292,7 +295,7 @@ def supply_zones(df, n, bias, start):
         j, c = t_idx[t], t_idx[conf]
         lh = is_lower_high(ev, conf_i, t, price, c)            # looser rules for a zone at a LH (see above)
         top, bot = H[j], L[j]
-        hit = np.flatnonzero(L[j + 1:j + 1 + SHARP_K] <= bot - SHARP_ATR * atr[j])
+        hit = np.flatnonzero(L[j + 1:j + 1 + SHARP_K] <= min(bot - SHARP_ATR * atr[j], bot * (1 - SUPPLY_MIN_PCT / 100)))
         sharp = hit.size > 0                                   # else drawn grey
         if sharp:
             c = max(c, j + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
@@ -325,7 +328,7 @@ supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
 
 # Demand zones: the supply-zone rules mirrored for longs. Every 8-candle swing low; zone = the full range of that candle
 # (a candle taller than WIDE_ZONE % only its lower wick: from the low up to the body low, at least MIN_ZONE % tall).
-# Very sharp move up: within SHARP_K candles a high at least SHARP_ATR x ATR above the candle high (else not kept, like
+# Very sharp move up: within SHARP_K candles a high at least SHARP_ATR x ATR and DEMAND_MIN_PCT % above the candle high (else not kept, like
 # DRAW_GREY). Shown from the first close it is known with a bullish live bias (bias bar green) and before price traded
 # back into it; ended at the first candle that trades back into it after price left it (a low above it), a lower low,
 # when the bias stops being bullish, or when a newer leg low settles. Zones at a HL (the bottom of a pullback of at
@@ -372,7 +375,7 @@ def demand_zones(df, n, bias, start):
         j, c = t_idx[t], t_idx[conf]
         hl = is_higher_low(ev, conf_i, t, price, c)
         top, bot = H[j], L[j]
-        hit = np.flatnonzero(H[j + 1:j + 1 + SHARP_K] >= top + SHARP_ATR * atr[j])
+        hit = np.flatnonzero(H[j + 1:j + 1 + SHARP_K] >= max(top + SHARP_ATR * atr[j], top * (1 + DEMAND_MIN_PCT / 100)))
         sharp = hit.size > 0
         if sharp:
             c = max(c, j + 1 + int(hit[0]))

@@ -29,7 +29,7 @@ src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="u
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
-    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS"}:
+    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT"}:
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)
@@ -48,7 +48,10 @@ for name, (ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
     ZONES[name] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
 ns["LH_BIAS"] = True
 ZONES["new + LH needs bias"] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
-DEMAND = ns["demand_zones"](df, ns["LEG_N"], bias, start_low)     # the same rules mirrored for longs
+DEMAND_MINS = (0.0, 1.5, 2.0)          # minimum % rise beyond the zone candle tested for the demand zones
+DEMANDS = {}
+for ns["DEMAND_MIN_PCT"] in DEMAND_MINS:
+    DEMANDS[ns["DEMAND_MIN_PCT"]] = ns["demand_zones"](df, ns["LEG_N"], bias, start_low)
 
 # Longs run through the same short logic on mirrored prices: high <-> -low, open / close negated, bias negated, and the
 # newer-leg-low start; a demand zone [top, bottom] becomes [-bottom, -top].
@@ -207,18 +210,19 @@ def stats(net, times):
             f"{(eq.iloc[-1] - 1) * 100:>+10.1f}% {dd:>6.1f}% {worst:>10}   {years}")
 
 
-print(f"\nDemand zones (longs, {len(DEMAND)} drawn), entry plan, and shorts + longs together (supply: {cur}):")
-print(f"{'target':>10} {'trades':>23} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
-for target in ("drop low", f"{FIXED_R}R"):
-    parts = {}
-    for side, zs in (("short", ZONES[cur]), ("long", DEMAND)):
-        d, _ = run(zs, "plan", target, side=side)
-        d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
-        d["hl"] = [z[5] for z in d["zone"]]
-        parts[side] = d
-    lo = parts["long"]
-    both = pd.concat(parts.values()).sort_values("time")
-    for name, g in (("longs", lo), ("  at a HL", lo[lo["hl"] == 1]), ("  normal", lo[lo["hl"] == 0]),
-                    ("shorts", parts["short"]), ("shorts + longs", both)):
-        print(f"{target:>10} {name:>16} " + stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)))
-    print()
+for dmin, DEMAND in DEMANDS.items():
+  print(f"\nDemand zones with a rise of at least {dmin}% (longs, {len(DEMAND)} drawn), entry plan, and shorts + longs together (supply: {cur}):")
+  print(f"{'target':>10} {'trades':>23} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
+  for target in ("drop low", f"{FIXED_R}R"):
+      parts = {}
+      for side, zs in (("short", ZONES[cur]), ("long", DEMAND)):
+          d, _ = run(zs, "plan", target, side=side)
+          d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
+          d["hl"] = [z[5] for z in d["zone"]]
+          parts[side] = d
+      lo = parts["long"]
+      both = pd.concat(parts.values()).sort_values("time")
+      for name, g in (("longs", lo), ("  at a HL", lo[lo["hl"] == 1]), ("  normal", lo[lo["hl"] == 0]),
+                      ("shorts", parts["short"]), ("shorts + longs", both)):
+          print(f"{target:>10} {name:>16} " + stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)))
+      print()
