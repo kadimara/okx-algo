@@ -29,7 +29,7 @@ src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="u
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
-    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS"}:
+    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS", "STRUCT_MODE"}:
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)
@@ -259,4 +259,38 @@ for zn in (ns["LEG_N"], 12):
             zc = f"{len(SUP)}s/{len(DEM)}d" if name == "all" else ""
             print(f"{zn:>7}c {bname:>12} {zc:>14} {name:>12} " + (stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)) if len(g) else "     0"))
         print()
+ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = False
+
+
+
+# Structure mode: the bias, MSS and newer-leg starts from breaks of the structural levels (the chart) vs breaks of the
+# most recent swing high / low ("swing"). Zones and trades with the same rules on each.
+print("\nStructure mode (bias / MSS from structural levels vs the most recent swings), entry plan, target drop low:")
+print(f"{'mode':>11} {'bias':>10} {'zones':>9} {'group':>14} {'trades':>6} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
+MODES = {"structural": (bias, start, start_low)}
+ns["STRUCT_MODE"] = "swing"
+tr2, br2, st2, stl2 = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"], low_start=True)
+MODES["swing"] = (np.array(ns["bias_bar"](tr2, br2)), st2, stl2)
+ns["STRUCT_MODE"] = "structural"
+for mode, (b_, s_, sl_) in MODES.items():
+    flips = int((np.diff(np.sign(b_)) != 0).sum())
+    print(f"{mode:>11}: {flips} bias changes, {np.mean(b_ >= 1) * 100:.0f}% bullish / {np.mean(b_ <= -1) * 100:.0f}% bearish confirmed, "
+          f"{np.mean(np.abs(b_) == 0.5) * 100:.0f}% pending MSS")
+    SIDES["short"], SIDES["long"] = (H, L, O, C, b_, s_), (-L, -H, -O, -C, -b_, sl_)
+    for bname, mss in (("confirmed", False), ("MSS too", True)):
+        ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = mss
+        SUP, DEM = ns["supply_zones"](df, ns["LEG_N"], b_, s_), ns["demand_zones"](df, ns["LEG_N"], b_, sl_)
+        parts = {}
+        for side, zs in (("short", SUP), ("long", DEM)):
+            d, _ = run(zs, "plan", "drop low", side=side, lim=0.5 if mss else 1)
+            d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
+            d["hl"] = [z[5] for z in d["zone"]]
+            parts[side] = d
+        lo = parts["long"]
+        for name, g in (("shorts", parts["short"]), ("longs at a HL", lo[lo["hl"] == 1]), ("longs normal", lo[lo["hl"] == 0]),
+                        ("all", pd.concat(parts.values()).sort_values("time"))):
+            zc = f"{len(SUP)}s/{len(DEM)}d" if name == "all" else ""
+            print(f"{mode:>11} {bname:>10} {zc:>9} {name:>14} " + (stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)) if len(g) else "     0"))
+        print()
+SIDES["short"], SIDES["long"] = (H, L, O, C, bias, start), (-L, -H, -O, -C, -bias, start_low)
 ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = False

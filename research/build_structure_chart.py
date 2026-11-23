@@ -65,6 +65,10 @@ for hrs in LOWER_HOURS:
 # leg under MIN_LEG % is removed again and again (the pair goes, the more extreme neighbour of each side stays)
 # until every leg is at least MIN_LEG %. The last leg is still forming and is never removed.
 LEG_N, MIN_LEG = 8, 2.5
+# STRUCT_MODE: "structural" = breaks of the structural high / low (the levels that turn or continue the trend, see
+# structure); "swing" = breaks of the most recent swing high / low (a close above the last swing high is bullish, below
+# the last swing low bearish). Both on the same leg swings; MSS / MSB and the bias bar work the same.
+STRUCT_MODE = "structural"
 
 
 def base_swings(df, n):
@@ -105,7 +109,10 @@ def structure(close, P, i0, i1):
       the structural LH, the leg's next swing low the new LL, and the first swing high after that LL is taken
       as the LH right away, so the range to break is [LL, LH];
     - swings inside the range that break nothing are internal. Bullish mirrored.
-    A swing is used from its pivot candle on, so this only has no hindsight when every swing in P is confirmed."""
+    A swing is used from its pivot candle on, so this only has no hindsight when every swing in P is confirmed.
+    With STRUCT_MODE "swing" the levels are simply the most recent swing high and low instead (see swing_structure)."""
+    if STRUCT_MODE == "swing":
+        return swing_structure(close, P, i0, i1)
     at = {t_idx[p[0]]: k for k, p in enumerate(P)}
     hi = lo = None                # indices into P of the structural high / low (None = waiting for the leg's extreme)
     need, trend, keep, brk = None, 0, set(), i0
@@ -156,6 +163,34 @@ def structure(close, P, i0, i1):
     return {"hi": hi, "lo": lo, "trend": trend, "keep": keep, "brk": brk, "breaks": breaks, "bias": bias}
 
 
+def swing_structure(close, P, i0, i1):
+    """Structure on the most recent swings: the levels are the last swing high and the last swing low; a close above the
+    last swing high is a bullish break, below the last swing low a bearish one (a broken level is used up until the next
+    swing of that type). The broken swings are the structural ones (keep)."""
+    at = {t_idx[p[0]]: k for k, p in enumerate(P)}
+    hi = lo = None
+    trend, keep, brk, breaks, bias = 0, set(), i0, [], [0] * (i1 - i0)
+    for i in range(i0, i1):
+        if hi is not None and close[i] > P[hi][2]:
+            breaks.append([i, 1, P[hi][2], trend])
+            trend, brk = 1, i
+            keep.add(hi)
+            hi = None
+        elif lo is not None and close[i] < P[lo][2]:
+            breaks.append([i, -1, P[lo][2], trend])
+            trend, brk = -1, i
+            keep.add(lo)
+            lo = None
+        bias[i - i0] = trend
+        k = at.get(i)
+        if k is not None:
+            if P[k][1] == "h":
+                hi = k
+            else:
+                lo = k
+    return {"hi": hi, "lo": lo, "trend": trend, "keep": keep, "brk": brk, "breaks": breaks, "bias": bias}
+
+
 def structure_levels(df, P, st, end):
     """The current MSS / MSB of a structure run on swings P up to candle end: MSB = the structural level in the trend
     direction, MSS = the one against it (None when not set)."""
@@ -172,16 +207,20 @@ def structure_levels(df, P, st, end):
 
 
 def label_swings(P, keep):
-    """HH / LH / HL / LL for the swings P against the last structural swing of the same type; the swings outside keep
-    (they broke no structure) are internal: [pivot time, type, label, price, confirmed time, internal]."""
-    out, last = [], {}
-    for k, (t, ty, price, conf) in enumerate(P):
-        prev = last.get(ty)
-        lab = ("HH" if prev is None or price > prev else "LH") if ty == "h" else ("LL" if prev is None or price < prev else "HL")
-        if k in keep:
-            last[ty] = price
-        out.append([t, ty, lab, round(price, 1), conf, k not in keep])
-    return out
+    """HH / LH / HL / LL for the swings P against the previous swing of the same type; the swings outside keep (they
+    broke no structure) are internal: [pivot time, type, label, price, confirmed time, internal]."""
+    return relabel([[t, ty, "", round(price, 1), conf, k not in keep] for k, (t, ty, price, conf) in enumerate(P)])
+
+
+def relabel(rows):
+    """Set the label of each swing row [time, type, label, price, ...] (in time order) against the previous swing of the
+    same type: HH / LH for highs, HL / LL for lows."""
+    last = {}
+    for row in rows:
+        prev = last.get(row[1])
+        row[2] = ("HH" if prev is None or row[3] > prev else "LH") if row[1] == "h" else ("LL" if prev is None or row[3] < prev else "HL")
+        last[row[1]] = row[3]
+    return rows
 
 
 def leg_swings(df, n, min_leg):
@@ -228,7 +267,7 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
     for b in breaks:
         b[3] = trend[b[0] - 1]
     out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
-    return out + ({"legs": sorted(lab.values()), "levels": levels},) if labels else out
+    return out + ({"legs": relabel(sorted(lab.values())), "levels": levels},) if labels else out
 
 
 def bias_bar(trend, breaks):
