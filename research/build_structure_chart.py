@@ -393,10 +393,53 @@ def demand_zones(df, n, bias, start):
 demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low)
 
 
-data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
+# Retest zones (a level tested twice, no sharp move needed): a new 8-candle swing low within RETEST_PCT % of an earlier
+# swing low from the last RETEST_DAYS days, with a bounce of at least RETEST_BOUNCE % between them and no low below the
+# level in between. Zone = from the lower of the two lows up to the higher body low of the two candles, at least
+# MIN_ZONE % and at most WIDE_ZONE % tall, drawn from the first test. Known when the second low is confirmed; shown,
+# ended and filtered like a demand zone (bullish bias or bullish MSS, ended by a touch after price left it, a lower
+# low, the bias turning or a newer leg low). Supply mirrored: two swing highs.
+# [tSecondTest, tEnd (None = still active), top, bottom, 1, 0, tFirstTest]
+RETEST_PCT, RETEST_BOUNCE, RETEST_DAYS = 0.5, 1.5, 10
+
+
+def retest_zones(df, n, bias, start, side):
+    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    body_lo, body_hi = np.minimum(O, C), np.maximum(O, C)
+    pts = [(t_idx[p[0]], t_idx[p[3]], float(p[2])) for p in swing_events(df, n) if p[1] == ("l" if side > 0 else "h")]
+    span, out = RETEST_DAYS * 24 / TFH, []
+    for b, (j2, c2, p2) in enumerate(pts):
+        for j1, c1, p1 in reversed(pts[:b]):
+            if j1 >= j2 or c1 > c2 or j2 - j1 > span or abs(p2 / p1 - 1) * 100 > RETEST_PCT:
+                continue
+            if side > 0:
+                bot = min(p1, p2)
+                if L[j1 + 1:j2].min() < bot or H[j1 + 1:j2].max() < max(p1, p2) * (1 + RETEST_BOUNCE / 100):
+                    continue
+                top = min(max(body_lo[j1], body_lo[j2]), bot * (1 + WIDE_ZONE / 100))
+                top = max(top, bot * (1 + MIN_ZONE / 100))
+                shown, end = demand_life(L, j2, c2, top, bot, T[j2], bias, start)
+            else:
+                top = max(p1, p2)
+                if H[j1 + 1:j2].max() > top or L[j1 + 1:j2].min() > min(p1, p2) * (1 - RETEST_BOUNCE / 100):
+                    continue
+                bot = max(min(body_hi[j1], body_hi[j2]), top / (1 + WIDE_ZONE / 100))
+                bot = min(bot, top / (1 + MIN_ZONE / 100))
+                shown, end = zone_life(H, j2, c2, top, bot, T[j2], bias, start)
+            if shown is not None:
+                out.append([T[j2], None if end is None else T[end], round(top, 1), round(bot, 1), 1, 0, T[j1]])
+            break                                              # the most recent earlier swing that qualifies
+    return out
+
+
+demand_retest = retest_zones(sig, LEG_N, leg_bias, swing_start_low, 1)
+supply_retest = retest_zones(sig, LEG_N, leg_bias, swing_start, -1)
+
+
+data = {"supply": supply, "demand": demand, "demandRetest": demand_retest, "supplyRetest": supply_retest, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
         "legs": legs, "legLevels": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
         "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(demand)} demand zones,", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(demand)} demand zones, retest zones {len(demand_retest)} demand / {len(supply_retest)} supply,", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")

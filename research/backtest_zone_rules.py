@@ -29,7 +29,7 @@ src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="u
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
-    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "MSS_OK"}:
+    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "MSS_OK", "RETEST_PCT"}:
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)
@@ -37,6 +37,7 @@ df = pd.read_csv(files[-1], index_col=0, parse_dates=True)
 ns["ts"] = ts = lambda t: int(pd.Timestamp(t).timestamp())
 ns["T"] = T = [ts(t) for t in df.index]
 ns["t_idx"] = t_idx = {t: i for i, t in enumerate(T)}
+ns["TFH"] = 1
 O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
 
 trend, breaks, start, start_low = ns["live_structure"](df, ns["LEG_N"], ns["MIN_LEG"], low_start=True)
@@ -231,3 +232,21 @@ for mss, (SUP, DEMAND) in BOTH.items():
                       ("shorts", parts["short"]), ("shorts + longs", both)):
           print(f"{target:>10} {name:>16} " + stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)))
       print()
+
+
+# Retest zones (a level tested twice, no sharp move), with the MSS allowed as on the chart: longs and shorts separately,
+# next to the impulse zones of the same setting.
+ns["MSS_OK"] = True
+RETEST = {"short": ns["retest_zones"](df, ns["LEG_N"], bias, start, -1),
+          "long": ns["retest_zones"](df, ns["LEG_N"], bias, start_low, 1)}
+ns["MSS_OK"] = False
+SUP, DEM = BOTH[True]
+print(f"\nRetest zones ({len(RETEST['short'])} supply / {len(RETEST['long'])} demand) vs the impulse zones, MSS allowed, entry plan:")
+print(f"{'target':>10} {'trades':>23} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
+for target in ("drop low", f"{FIXED_R}R"):
+    for name, side, zs in (("retest longs", "long", RETEST["long"]), ("retest shorts", "short", RETEST["short"]),
+                           ("impulse longs", "long", DEM), ("impulse shorts", "short", SUP)):
+        d, _ = run(zs, "plan", target, side=side, lim=0.5)
+        d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
+        print(f"{target:>10} {name:>16} " + (stats(d["net"].reset_index(drop=True), d["time"].reset_index(drop=True)) if len(d) else "     0"))
+    print()
