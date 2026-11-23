@@ -162,3 +162,22 @@ for target in ("drop low", f"{FIXED_R}R"):
               f"{dd:>6.1f}% {worst:>10}   {years}")
     print()
 print("at BE = trades closed at the entry after the stop moved (a small loss: the fees); worst run = most losing trades in a row.")
+
+# Where the losses come from: the entry plan (no break-even) split by zone type. Zones at a LH (the top of a pullback
+# below the previous leg high) are shown whatever the bias; normal zones need a bearish live bias.
+print("\nEntry plan by zone type (no break-even):")
+print(f"{'target':>10} {'zones':>16} {'trades':>6} {'win':>5} {'avg R':>7} {'return':>8} {'max DD':>7} {'worst run':>10}   per year")
+for target in ("drop low", f"{FIXED_R}R"):
+    d, _ = run(ZONES[cur], "plan", target)
+    d = d.dropna(subset=["r"])
+    d["net"] = d["r"] - 2 * FEE / d["risk_pct"]
+    d["lh"] = [z[5] for z in d["zone"]]
+    for name, g in (("all", d), ("at a LH", d[d["lh"] == 1]), ("normal (bias)", d[d["lh"] == 0])):
+        eq = (1 + RISK / 100 * g["net"]).cumprod()
+        dd = (1 - eq / eq.cummax()).max() * 100
+        losing = (g["net"] < 0).astype(int)
+        worst = int(losing.groupby((losing == 0).cumsum()).sum().max())
+        years = "  ".join(f"{y}: {x.sum() * RISK:+.1f}%" for y, x in g["net"].groupby(g["time"].dt.year))
+        print(f"{target:>10} {name:>16} {len(g):>6} {(g['net'] > 0).mean() * 100:>4.0f}% {g['net'].mean():>+7.2f} "
+              f"{g['net'].sum() * RISK:>+7.1f}% {dd:>6.1f}% {worst:>10}   {years}")
+    print()
