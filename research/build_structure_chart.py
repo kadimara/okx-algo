@@ -326,7 +326,7 @@ SUPPLY_MSS_OK, DEMAND_MSS_OK = True, True   # per side: shorts also in a bearish
 COUNTER_MSS_ENDS = True
 # Minimum size of the sharp move in % beyond the zone candle (on top of SHARP_ATR x ATR): in quiet markets 2 ATR can be
 # only ~1 %, which does not look sharp. 0 = ATR only.
-SUPPLY_MIN_PCT, DEMAND_MIN_PCT = 0.0, 1.5
+SUPPLY_MIN_PCT, DEMAND_MIN_PCT = 0.0, 1.0
 
 
 def wilder_atr(df, length=14):
@@ -404,7 +404,11 @@ supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
 # Demand zones are only kept at a HL (DEMAND_HL_ONLY) that came after a HH (DEMAND_AFTER_HH: on the 8-candle swings
 # known at the confirmation, the swing high between the previous low and the zone's low is above the high before it).
 # Supply zones have no such filter (their best trades are at the top of a pullback, a local HH).
-DEMAND_HL_ONLY, DEMAND_AFTER_HH = True, True
+DEMAND_HL_ONLY, DEMAND_AFTER_HH = True, False
+# Demand-only settings (the grid in backtest_demand.py): a less sharp rise (DEMAND_SHARP_ATR x ATR and DEMAND_MIN_PCT %
+# within SHARP_K candles), and a bearish MSS does not end a demand zone (only a confirmed downtrend does).
+DEMAND_SHARP_ATR = 1.5
+DEMAND_COUNTER_MSS_ENDS = False
 
 
 def after_hh(ev, conf_i, t, c):
@@ -435,7 +439,7 @@ def demand_life(L, j, c, top, bot, t, bias, start, hl=False, need_bias=True):
     left, shown = False, None
     for k in range(j + 1, len(L)):
         if L[k] < bot or (left and L[k] <= top) or (start[k] is not None and start[k] > t) \
-                or (shown is not None and need_bias and (bias[k] < (0.5 if DEMAND_MSS_OK else 1) if COUNTER_MSS_ENDS else bias[k] <= -1)):
+                or (shown is not None and need_bias and (bias[k] < (0.5 if DEMAND_MSS_OK else 1) if DEMAND_COUNTER_MSS_ENDS else bias[k] <= -1)):
             return shown, k
         if not hl or k >= c:
             left = left or L[k] > top
@@ -459,7 +463,7 @@ def demand_zones(df, n, bias, start):
         if (DEMAND_HL_ONLY and not hl) or (DEMAND_AFTER_HH and not ahh):
             continue
         top, bot = H[j], L[j]
-        hit = np.flatnonzero(H[j + 1:j + 1 + SHARP_K] >= max(top + SHARP_ATR * atr[j], top * (1 + DEMAND_MIN_PCT / 100)))
+        hit = np.flatnonzero(H[j + 1:j + 1 + SHARP_K] >= max(top + DEMAND_SHARP_ATR * atr[j], top * (1 + DEMAND_MIN_PCT / 100)))
         sharp = hit.size > 0
         if sharp:
             c = max(c, j + 1 + int(hit[0]))

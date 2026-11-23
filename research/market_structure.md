@@ -125,7 +125,7 @@ Internal swings are drawn faded.
 
 The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
 
-- **Only at a HL after a HH** (since 23 Nov 2026, `DEMAND_HL_ONLY`, `DEMAND_AFTER_HH`): the zone's swing low must be a HL (see below), and on the 8-candle swings known at its confirmation the swing high just before it must be above the swing high before that. In the 4-year backtest these longs won 50-56 %; demand zones at a new LL, or after a LH, lost. Supply zones have no such filter.
+- **Demand rules (since 23 Nov 2026, from the grid in `backtest_demand.py`):** only at a HL (`DEMAND_HL_ONLY`; the stricter "after a HH" filter `DEMAND_AFTER_HH` is off: higher win rate but half the trades); a rise of 1.5 ATR (`DEMAND_SHARP_ATR`) and at least 1 % (`DEMAND_MIN_PCT`) within 4 candles; a bearish MSS does not end the zone, only a confirmed downtrend (`DEMAND_COUNTER_MSS_ENDS = False`). 4 years: 38 longs, +27 % at 1 % risk, 5.6 % max drawdown. Supply zones keep their own rules.
 
 - **The zone:** each 8-candle swing low, as confirmed live, spanning the full range of the candle that made the low. A candle taller than 1 % gives only its lower wick: from the low up to the body low (the lower of open and close), at least 0.5 % tall.
 - **Very sharp move up:** within 4 candles a high at least 2 × ATR(14) above the candle high. Zones without it are not drawn.

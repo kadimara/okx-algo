@@ -27,7 +27,7 @@ from structure import analyze_bos_structure, bos_pivot_list
 src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="utf-8")
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 SETTINGS = {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS",
-            "STRUCT_MODE", "DEMAND_HL_ONLY"}
+            "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_COUNTER_MSS_ENDS"}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
     if isinstance(node, ast.FunctionDef) or names & SETTINGS:
@@ -97,9 +97,9 @@ def stats(d):
 
 res = []
 for sharp_atr, min_pct in itertools.product((1.5, 2.0, 2.5), (0.0, 1.0, 1.5, 2.0)):
-    ns["SHARP_ATR"], ns["DEMAND_MIN_PCT"] = sharp_atr, min_pct
+    ns["DEMAND_SHARP_ATR"], ns["DEMAND_MIN_PCT"] = sharp_atr, min_pct
     for mss, counter in itertools.product((False, True), (True, False)):
-        ns["DEMAND_MSS_OK"], ns["COUNTER_MSS_ENDS"] = mss, counter
+        ns["DEMAND_MSS_OK"], ns["DEMAND_COUNTER_MSS_ENDS"] = mss, counter
         zones = ns["demand_zones"](df, ns["LEG_N"], bias, start_low)
         for target in ("rally high", "2R", "3R"):
             d = longs(zones, 0.5 if mss else 1, not counter, target)
@@ -113,8 +113,8 @@ res = pd.DataFrame(res)
 pd.set_option("display.width", 250, "display.max_columns", 20, "display.max_colwidth", 80)
 print(f"Data {df.index[0]:%Y-%m-%d} .. {df.index[-1]:%Y-%m-%d}; {len(res)} combinations. Returns in % of the account "
       f"({RISK}% risk per trade, fees included).\n")
-print("Current chart rule (2 ATR / 1.5%, MSS too, a counter MSS ends the zone):")
-cur = res[(res["sharp"] == "2 ATR / 1.5%") & (res["bias"] == "MSS too") & (res["counter MSS"] == "ends")]
+print("Current chart rule (1.5 ATR / 1%, MSS too, a counter MSS keeps the zone):")
+cur = res[(res["sharp"] == "1.5 ATR / 1%") & (res["bias"] == "MSS too") & (res["counter MSS"] == "keeps")]
 print(cur.drop(columns=["sharp", "bias", "counter MSS"]).round(2).to_string(index=False))
 ok = res[res["trades"] >= MIN_TRADES]
 print(f"\nTop 25 by return with at least {MIN_TRADES} trades:")
