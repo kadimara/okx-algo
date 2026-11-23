@@ -106,3 +106,18 @@ for target in ("drop low", f"{FIXED_R}R"):
         print()
 print("1R % = median stop distance; tgt R = median target in R; win / avg R / total R after fees, open trades left out;"
       "\nopen = still running at the end of the data.")
+
+# Stop distance (entry to stop, % of the entry) of the trades of the current rule: tight stops get hit by noise and
+# pay relatively more fees, wide stops need a big move to reach the target.
+STOP_BINS = (0, 0.3, 0.5, 1.0, 2.0, np.inf)
+cur = list(ZONES)[-1]
+print(f"\nBy stop distance, {cur}:")
+print(f"{'entry / target / stop':<34} {'trades':>6} {'':>8} {'1R %':>7} {'tgt R':>8} {'win':>6} {'avg R':>8} {'total R':>9} {'open':>5}")
+for target in ("drop low", f"{FIXED_R}R"):
+    for entry in ("zone", "mid"):
+        d, _ = run(ZONES[cur], entry, target)
+        for lo_b, hi_b in zip(STOP_BINS, STOP_BINS[1:]):
+            g = d[(d["risk_pct"] >= lo_b) & (d["risk_pct"] < hi_b)] if len(d) else d
+            lab = f"< {hi_b}%" if lo_b == 0 else f">= {lo_b}%" if hi_b == np.inf else f"{lo_b}-{hi_b}%"
+            print(line(f"{entry} / {target} / {lab}", g))
+        print()
