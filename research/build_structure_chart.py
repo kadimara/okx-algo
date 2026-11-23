@@ -408,6 +408,7 @@ DEMAND_HL_ONLY, DEMAND_AFTER_HH = True, False
 # Demand-only settings (the grid in backtest_demand.py): a less sharp rise (DEMAND_SHARP_ATR x ATR and DEMAND_MIN_PCT %
 # within SHARP_K candles), and a bearish MSS does not end a demand zone (only a confirmed downtrend does).
 DEMAND_SHARP_ATR = 1.5
+DEMAND_SHARP_K = 4        # candles after the swing low in which the rise must happen
 DEMAND_COUNTER_MSS_ENDS = False
 
 
@@ -463,7 +464,7 @@ def demand_zones(df, n, bias, start):
         if (DEMAND_HL_ONLY and not hl) or (DEMAND_AFTER_HH and not ahh):
             continue
         top, bot = H[j], L[j]
-        hit = np.flatnonzero(H[j + 1:j + 1 + SHARP_K] >= max(top + DEMAND_SHARP_ATR * atr[j], top * (1 + DEMAND_MIN_PCT / 100)))
+        hit = np.flatnonzero(H[j + 1:j + 1 + DEMAND_SHARP_K] >= max(top + DEMAND_SHARP_ATR * atr[j], top * (1 + DEMAND_MIN_PCT / 100)))
         sharp = hit.size > 0
         if sharp:
             c = max(c, j + 1 + int(hit[0]))

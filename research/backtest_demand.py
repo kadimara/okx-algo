@@ -27,7 +27,7 @@ from structure import analyze_bos_structure, bos_pivot_list
 src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="utf-8")
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 SETTINGS = {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS",
-            "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_COUNTER_MSS_ENDS"}
+            "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_SHARP_K", "DEMAND_COUNTER_MSS_ENDS"}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
     if isinstance(node, ast.FunctionDef) or names & SETTINGS:
@@ -96,9 +96,11 @@ def stats(d):
 
 
 res = []
-for sharp_atr, min_pct in itertools.product((1.5, 2.0, 2.5), (0.0, 1.0, 1.5, 2.0)):
-    ns["DEMAND_SHARP_ATR"], ns["DEMAND_MIN_PCT"] = sharp_atr, min_pct
-    for mss, counter in itertools.product((False, True), (True, False)):
+# The rise: within K candles, at least A x ATR and P % above the zone candle's high (0 / 0 = no sharpness requirement)
+SHARP = [(k, a, p) for k in (4, 8, 12) for a, p in ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (1.5, 0.0), (1.5, 1.0), (2.0, 1.0))]
+for sharp_k, sharp_atr, min_pct in SHARP:
+    ns["DEMAND_SHARP_K"], ns["DEMAND_SHARP_ATR"], ns["DEMAND_MIN_PCT"] = sharp_k, sharp_atr, min_pct
+    for mss, counter in ((True, False), (True, True), (False, False)):
         ns["DEMAND_MSS_OK"], ns["DEMAND_COUNTER_MSS_ENDS"] = mss, counter
         zones = ns["demand_zones"](df, ns["LEG_N"], bias, start_low)
         for target in ("rally high", "2R", "3R"):
@@ -107,18 +109,19 @@ for sharp_atr, min_pct in itertools.product((1.5, 2.0, 2.5), (0.0, 1.0, 1.5, 2.0
                 continue
             for filt, g in (("all", d), ("HL", d[d["hl"] == 1]), ("HL after HH", d[(d["hl"] == 1) & (d["ahh"] == 1)])):
                 if len(g):
-                    res.append({"sharp": f"{sharp_atr:g} ATR / {min_pct:g}%", "bias": "MSS too" if mss else "confirmed",
+                    res.append({"sharp": f"{sharp_k}c {sharp_atr:g} ATR / {min_pct:g}%", "bias": "MSS too" if mss else "confirmed",
                                 "counter MSS": "ends" if counter else "keeps", "target": target, "zones": filt, **stats(g)})
 res = pd.DataFrame(res)
 pd.set_option("display.width", 250, "display.max_columns", 20, "display.max_colwidth", 80)
 print(f"Data {df.index[0]:%Y-%m-%d} .. {df.index[-1]:%Y-%m-%d}; {len(res)} combinations. Returns in % of the account "
       f"({RISK}% risk per trade, fees included).\n")
-print("Current chart rule (1.5 ATR / 1%, MSS too, a counter MSS keeps the zone):")
-cur = res[(res["sharp"] == "1.5 ATR / 1%") & (res["bias"] == "MSS too") & (res["counter MSS"] == "keeps")]
+print("Current chart rule (4c 1.5 ATR / 1%, MSS too, a counter MSS keeps the zone):")
+cur = res[(res["sharp"] == "4c 1.5 ATR / 1%") & (res["bias"] == "MSS too") & (res["counter MSS"] == "keeps")]
 print(cur.drop(columns=["sharp", "bias", "counter MSS"]).round(2).to_string(index=False))
 ok = res[res["trades"] >= MIN_TRADES]
 print(f"\nTop 25 by return with at least {MIN_TRADES} trades:")
 print(ok.sort_values("ret", ascending=False).head(25).round(2).to_string(index=False))
 print(f"\nAverage over all combinations with at least {MIN_TRADES} trades (robustness: how each choice does across the rest):")
-for col in ("zones", "bias", "counter MSS", "target", "sharp"):
+ok = ok.assign(window=ok["sharp"].str.split(" ").str[0])
+for col in ("zones", "bias", "counter MSS", "target", "window", "sharp"):
     print(ok.groupby(col)[["trades", "win", "avgR", "ret", "dd"]].mean().round(2).to_string(), "\n")
