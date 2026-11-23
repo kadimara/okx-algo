@@ -253,6 +253,9 @@ DRAW_GREY = False     # zones without the very sharp drop (grey on the chart): o
 # A zone candle taller than WIDE_ZONE % becomes its upper wick: from the high down to the body high (max of open and
 # close), but at least MIN_ZONE % tall. The sharp-drop test still uses the candle low.
 WIDE_ZONE, MIN_ZONE = 1.0, 0.5
+# LH_BIAS: zones at a LH also need the bearish live bias (shown only then, ended when it stops); they keep the rule that
+# touches before the swing high is confirmed do not count. False = the looser LH rules (no bias needed).
+LH_BIAS = True
 
 
 def wilder_atr(df, length=14):
@@ -291,23 +294,24 @@ def supply_zones(df, n, bias, start):
             c = max(c, j + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
         if (top - bot) / bot * 100 > WIDE_ZONE:                # a wide candle: the zone is its upper wick
             bot = min(max(O[j], C[j]), top / (1 + MIN_ZONE / 100))
-        shown, end = zone_life(H, j, c, top, bot, t, bias, start, lh)
+        shown, end = zone_life(H, j, c, top, bot, t, bias, start, lh, need_bias=not lh or LH_BIAS)
         if shown is not None and (sharp or DRAW_GREY):
             out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh)])
     return out
 
 
-def zone_life(H, j, c, top, bot, t, bias, start, lh=False):
+def zone_life(H, j, c, top, bot, t, bias, start, lh=False, need_bias=True):
     """When a zone at candle j (known from the close of candle c) is shown and ends: (shown, end) candle indices, None
-    when it is never shown / still active. See the supply-zone rules above."""
+    when it is never shown / still active. See the supply-zone rules above. lh: touches before c do not count;
+    need_bias: shown only with a bearish live bias and ended when the bias stops being bearish."""
     left, shown = False, None
     for k in range(j + 1, len(H)):
         if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
-                or (shown is not None and not lh and bias[k] > -1):
+                or (shown is not None and need_bias and bias[k] > -1):
             return shown, k
         if not lh or k >= c:                                   # at a LH, touches before it is known do not count
             left = left or H[k] < bot
-        if shown is None and k >= c and (lh or bias[k] <= -1):
+        if shown is None and k >= c and (not need_bias or bias[k] <= -1):
             shown = k
     return shown, None
 
