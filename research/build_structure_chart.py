@@ -263,6 +263,9 @@ LH_BIAS = True
 # MSS_OK: a pending MSS in the zone's direction counts as the right bias (bias bar faded: -0.5 bearish MSS for supply,
 # +0.5 bullish MSS for demand), so zones at the start of a reversal are shown before the first MSB confirms it.
 MSS_OK = True
+# COUNTER_MSS_ENDS: a shown zone ends when the bias leaves its side, also for a pending MSS against it (often from a
+# small internal break). False = only a confirmed opposite trend ends it (supply: bias +1, demand: bias -1).
+COUNTER_MSS_ENDS = True
 # Minimum size of the sharp move in % beyond the zone candle (on top of SHARP_ATR x ATR): in quiet markets 2 ATR can be
 # only ~1 %, which does not look sharp. 0 = ATR only.
 SUPPLY_MIN_PCT, DEMAND_MIN_PCT = 0.0, 1.5
@@ -317,7 +320,7 @@ def zone_life(H, j, c, top, bot, t, bias, start, lh=False, need_bias=True):
     left, shown = False, None
     for k in range(j + 1, len(H)):
         if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
-                or (shown is not None and need_bias and bias[k] > -(0.5 if MSS_OK else 1)):
+                or (shown is not None and need_bias and (bias[k] > -(0.5 if MSS_OK else 1) if COUNTER_MSS_ENDS else bias[k] >= 1)):
             return shown, k
         if not lh or k >= c:                                   # at a LH, touches before it is known do not count
             left = left or H[k] < bot
@@ -357,7 +360,7 @@ def demand_life(L, j, c, top, bot, t, bias, start, hl=False, need_bias=True):
     left, shown = False, None
     for k in range(j + 1, len(L)):
         if L[k] < bot or (left and L[k] <= top) or (start[k] is not None and start[k] > t) \
-                or (shown is not None and need_bias and bias[k] < (0.5 if MSS_OK else 1)):
+                or (shown is not None and need_bias and (bias[k] < (0.5 if MSS_OK else 1) if COUNTER_MSS_ENDS else bias[k] <= -1)):
             return shown, k
         if not hl or k >= c:
             left = left or L[k] > top
