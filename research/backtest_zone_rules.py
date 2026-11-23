@@ -294,3 +294,47 @@ for mode, (b_, s_, sl_) in MODES.items():
         print()
 SIDES["short"], SIDES["long"] = (H, L, O, C, bias, start), (-L, -H, -O, -C, -bias, start_low)
 ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = False
+
+
+# Pullback zones: a supply zone at a local HH with no LL in between (swings L0 < L1 and H_prev < H at the zone: the
+# pullback up inside a bearish structure); demand mirrored (a local LL with no HH: H0 > H1 and L_prev > L). Checked on the
+# 8-candle swings known when the zone's swing is confirmed (a swing replaced by a more extreme one dropped).
+EVS = ns["swing_events"](df, ns["LEG_N"])
+EV_C = [t_idx[p[3]] for p in EVS]
+
+
+def pullback(z, side):
+    t = z[0]
+    j = next((k for k, p in enumerate(EVS) if p[0] == t and p[1] == ("h" if side == "short" else "l")), None)
+    if j is None:
+        return False
+    known = EVS[:bisect.bisect_right(EV_C, EV_C[j])][-40:]
+    known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
+    pos = next((k for k, p in enumerate(known) if p[0] == t), None)
+    if pos is None or pos < 3:
+        return False
+    x0, prev, x1, cur = known[pos - 3:pos + 1]      # short: L0, H_prev, L1, H (the zone) / long: H0, L_prev, H1, L
+    if side == "short":
+        return cur[2] > prev[2] and x1[2] > x0[2]
+    return cur[2] < prev[2] and x1[2] < x0[2]
+
+
+print("\nPullback zones (short: a local HH with no LL in between; long: a local LL with no HH), entry plan, target drop low:")
+print(f"{'bias':>10} {'zones':>18} {'group':>14} {'trades':>6} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
+for bname, mss in (("confirmed", False), ("MSS too", True)):
+    ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = mss
+    SUP, DEM = ns["supply_zones"](df, ns["LEG_N"], bias, start), ns["demand_zones"](df, ns["LEG_N"], bias, start_low)
+    parts = {}
+    for side, zs in (("short", SUP), ("long", DEM)):
+        d, _ = run(zs, "plan", "drop low", side=side, lim=0.5 if mss else 1)
+        d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
+        d["hl"] = [z[5] for z in d["zone"]]
+        d["pb"] = [pullback(z, side) for z in d["zone"]]
+        parts[side] = d
+    for fname, keep in (("all", lambda d: d), ("only pullback", lambda d: d[d["pb"]]), ("no pullback", lambda d: d[~d["pb"]])):
+        sh, lo = keep(parts["short"]), keep(parts["long"])
+        for name, g in (("shorts", sh), ("longs at a HL", lo[lo["hl"] == 1]), ("longs normal", lo[lo["hl"] == 0]),
+                        ("all", pd.concat([sh, lo]).sort_values("time"))):
+            print(f"{bname:>10} {fname:>18} {name:>14} " + (stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)) if len(g) else "     0"))
+        print()
+ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = False
