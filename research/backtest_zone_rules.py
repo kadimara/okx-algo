@@ -51,9 +51,12 @@ MIN_RR, FEE, FIXED_R = 2, 0.05, 3     # FEE in % per side
 # wider than WIDE_STOP %; stop at the zone top but at least MIN_STOP % from the entry. Sized to risk RISK % of the
 # account per trade (leverage = RISK / stop %).
 MIN_STOP, WIDE_STOP, RISK = 0.5, 1.0, 1.0
+# Break-even: once a candle's low is BE R in our favour, the stop moves to the entry from the next candle on
+# (None = never). The fill candle does not count (its low may have come before the fill).
+BE_TRIGGERS = (None, 1.0, 1.5, 2.0)
 
 
-def run(zones, entry, target):
+def run(zones, entry, target, be=None):
     rows, skipped = [], 0
     for z in zones:
         t0, t1, top, bot, sharp = z[:5]
@@ -85,11 +88,18 @@ def run(zones, entry, target):
         if rr < MIN_RR - 1e-9:
             skipped += 1
             continue
-        stop_i = next((k for k in range(f, len(df)) if H[k] >= stop), None)
-        last = stop_i if stop_i is not None else len(df) - 1
-        hit = next((k for k in range(f + 1, last + 1) if L[k] <= lo and H[k] < stop), None)
-        r = rr if hit is not None else (-1.0 if stop_i is not None else np.nan)
-        rows.append({"time": df.index[f], "r": r, "risk_pct": risk / x * 100, "rr": rr, "zone": z})
+        r, cur_stop, moved = np.nan, stop, False
+        for k in range(f, len(df)):
+            if H[k] >= cur_stop:              # stop first: a candle that hits both is a loss (or break-even)
+                r = (x - cur_stop) / risk
+                break
+            if k > f and L[k] <= lo:
+                r = rr
+                break
+            if be is not None and k > f and L[k] <= x - be * risk:
+                cur_stop, moved = x, True     # from the next candle on
+        rows.append({"time": df.index[f], "r": r, "risk_pct": risk / x * 100, "rr": rr, "zone": z,
+                     "be": moved and r == 0})
     return pd.DataFrame(rows), skipped
 
 
@@ -135,19 +145,20 @@ for target in ("drop low", f"{FIXED_R}R"):
 # The entry plan on the current rule, in % of the account (RISK % per trade, fees included)
 print(f"\nEntry plan on {cur}: entry at the zone bottom, or the body high when that stop is over {WIDE_STOP}%; stop at the "
       f"zone top, at least {MIN_STOP}%; {RISK}% of the account at risk per trade.")
+print(f"{'target':>10} {'break-even':>11} {'trades':>6} {'win':>5} {'at BE':>6} {'avg R':>7} {'return':>8} "
+      f"{'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
 for target in ("drop low", f"{FIXED_R}R"):
-    d, sk = run(ZONES[cur], "plan", target)
-    c = d.dropna(subset=["r"])
-    net = c["r"] - 2 * FEE / c["risk_pct"]
-    lev = RISK / c["risk_pct"]
-    eq = (1 + RISK / 100 * net).cumprod()
-    dd = (1 - eq / eq.cummax()).max() * 100
-    body = sum((z[2] - z[3]) / z[3] * 100 > WIDE_STOP for z in c["zone"])
-    print(f"  target {target:>8}: {len(d)} trades ({sk} skipped, {body} entered at the body high), "
-          f"{(c['risk_pct'] <= MIN_STOP + 1e-9).sum()} on the {MIN_STOP}% minimum stop; "
-          f"stop {c['risk_pct'].min():.2f}-{c['risk_pct'].max():.2f}% (median {c['risk_pct'].median():.2f}%), "
-          f"leverage {lev.min():.1f}-{lev.max():.1f}x (median {lev.median():.1f}x)")
-    print(f"  {'':>17} win {(net > 0).mean() * 100:.0f}%, avg {net.mean():+.2f}R, total {net.sum():+.1f}R = "
-          f"{net.sum() * RISK:+.1f}% simple, {(eq.iloc[-1] - 1) * 100:+.1f}% compounded, max drawdown {dd:.1f}%")
-    for y, g in c.assign(net=net).groupby(c["time"].dt.year):
-        print(f"  {'':>17} {y}: {len(g)} trades, {g['net'].sum() * RISK:+.1f}%")
+    for be in BE_TRIGGERS:
+        d, sk = run(ZONES[cur], "plan", target, be)
+        c = d.dropna(subset=["r"])
+        net = c["r"] - 2 * FEE / c["risk_pct"]
+        eq = (1 + RISK / 100 * net).cumprod()
+        dd = (1 - eq / eq.cummax()).max() * 100
+        losing = (net < 0).astype(int)
+        worst = int(losing.groupby((losing == 0).cumsum()).sum().max())
+        years = "  ".join(f"{y}: {g.sum() * RISK:+.1f}%" for y, g in net.groupby(c["time"].dt.year))
+        print(f"{target:>10} {'off' if be is None else f'at {be}R':>11} {len(c):>6} {(net > 0).mean() * 100:>4.0f}% "
+              f"{int(c['be'].sum()):>6} {net.mean():>+7.2f} {net.sum() * RISK:>+7.1f}% {(eq.iloc[-1] - 1) * 100:>+10.1f}% "
+              f"{dd:>6.1f}% {worst:>10}   {years}")
+    print()
+print("at BE = trades closed at the entry after the stop moved (a small loss: the fees); worst run = most losing trades in a row.")
