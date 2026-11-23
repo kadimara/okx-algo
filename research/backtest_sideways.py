@@ -31,7 +31,7 @@ from structure import analyze_bos_structure, bos_pivot_list
 
 # the structure functions and settings from the chart build script, without running the build
 src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="utf-8")
-ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "bisect": bisect}
+ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "bisect": bisect, "heapq": __import__("heapq"), "_MEMO": {}}
 for node in ast.parse(src).body:
     if isinstance(node, ast.FunctionDef) or (isinstance(node, ast.Assign) and any(
             getattr(t, "id", None) == "LEG_N" for t in getattr(node.targets[0], "elts", []))):

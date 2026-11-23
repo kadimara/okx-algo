@@ -26,7 +26,7 @@ from structure import analyze_bos_structure, bos_pivot_list
 
 # Take the structure functions and settings from the chart build script without running the build itself
 src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="utf-8")
-ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
+ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect, "heapq": __import__("heapq"), "_MEMO": {}}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
     if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS", "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_SHARP_K", "DEMAND_COUNTER_MSS_ENDS"}:

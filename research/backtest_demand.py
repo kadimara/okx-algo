@@ -25,7 +25,7 @@ import pandas as pd
 from structure import analyze_bos_structure, bos_pivot_list
 
 src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="utf-8")
-ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
+ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect, "heapq": __import__("heapq"), "_MEMO": {}}
 SETTINGS = {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS",
             "STRUCT_MODE", "DEMAND_HL_ONLY", "DEMAND_SHARP_ATR", "DEMAND_SHARP_K", "DEMAND_COUNTER_MSS_ENDS"}
 for node in ast.parse(src).body:

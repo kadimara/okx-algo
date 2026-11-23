@@ -3,6 +3,7 @@
 Usage: python build_chart.py   (run with the okx-algo venv; writes btc-market-structure.html next to this file)
 """
 import bisect
+import heapq
 import json
 import sys
 from pathlib import Path
@@ -48,17 +49,20 @@ lower = {}
 for hrs in LOWER_HOURS:
     nl = max(1, round(hrs / TFH))
     sl = analyze_bos_structure(sig, nl)
+    # columns read once as arrays: pandas deep-copies the frame's attrs (the swing events) on every column access,
+    # which made this loop take minutes
+    col = {k: sl[k].to_numpy() for k in ("choch_up", "choch_down", "bos_from_idx", "bos_level")}
     areas = []
     for i in range(len(sig)):
-        for d, col in ((1, "choch_up"), (-1, "choch_down")):
-            if not sl[col].iat[i]:
+        for d, name in ((1, "choch_up"), (-1, "choch_down")):
+            if not col[name][i]:
                 continue
             if ltf[i] != d:          # only MSSs in the direction of the 2-day trend (end of a pullback)
                 continue
-            p = int(sl["bos_from_idx"].iat[i])
+            p = int(col["bos_from_idx"][i])
             seg = slice(p, i + 1)
             e = p + int(l[seg].argmin() if d == 1 else h[seg].argmax())
-            areas.append([T[e], T[i], round(float(sl["bos_level"].iat[i]), 1), round(float(l[e] if d == 1 else h[e]), 1), d, T[p]])
+            areas.append([T[e], T[i], round(float(col["bos_level"][i]), 1), round(float(l[e] if d == 1 else h[e]), 1), d, T[p]])
     lower[str(hrs)] = areas
 
 # Leg swings (matched to a hand-labelled TradingView chart): the 8-candle break structure, then the smallest
@@ -85,21 +89,38 @@ def swing_events(df, n):
 
 
 def merge_legs(P, min_leg):
-    """Remove the smallest leg under min_leg % again and again; the first and last swing always stay."""
-    while True:
-        small = [(abs(P[i + 1][2] - P[i][2]) / P[i][2] * 100, i) for i in range(1, len(P) - 2)]
-        small = [s for s in small if s[0] < min_leg]
-        if not small:
-            return P
-        i = min(small)[1]
-        merged = []
-        for p in P[:i] + P[i + 2:]:
-            if merged and merged[-1][1] == p[1]:
-                if (p[2] > merged[-1][2]) == (p[1] == "h"):
-                    merged[-1] = p
-            else:
-                merged.append(p)
-        P = merged
+    """Remove the smallest leg under min_leg % again and again (ties: the leftmost); the first and last swing always
+    stay. A heap of legs over a linked list (same result as rebuilding the list after each removal, much faster)."""
+    Q = []                                         # alternate first: of two swings of the same type the more extreme stays
+    for p in P:
+        if Q and Q[-1][1] == p[1]:
+            if (p[2] > Q[-1][2]) == (p[1] == "h"):
+                Q[-1] = p
+        else:
+            Q.append(p)
+    n = len(Q)
+    if n < 4:
+        return Q
+    nxt, prv, alive = list(range(1, n + 1)), list(range(-1, n - 1)), [True] * n
+    pct = lambda a, b: abs(Q[b][2] - Q[a][2]) / Q[a][2] * 100
+    heap = [(pct(i, i + 1), i, i + 1) for i in range(1, n - 2) if pct(i, i + 1) < min_leg]
+    heapq.heapify(heap)
+    while heap:
+        _, a, b = heapq.heappop(heap)
+        if not (alive[a] and alive[b] and nxt[a] == b) or prv[a] < 0 or nxt[b] >= n:
+            continue                                # stale, or an end of the leg is the first / last swing
+        l, r = prv[a], nxt[b]
+        alive[a] = alive[b] = False
+        nxt[l], prv[r] = r, l
+        if prv[l] >= 0 and r < n - 1:              # the new leg l -> r
+            w = pct(l, r)
+            if w < min_leg:
+                heapq.heappush(heap, (w, l, r))
+    out, i = [], 0
+    while i < n:
+        out.append(Q[i])
+        i = nxt[i]
+    return out
 
 
 def structure(close, P, i0, i1):
@@ -335,7 +356,17 @@ def wilder_atr(df, length=14):
     return pd.Series(tr).ewm(alpha=1 / length, adjust=False).mean().to_numpy()
 
 
+_MEMO = {}   # results of is_lower_high / is_higher_low per swing (the backtests ask the same swings for many variants)
+
+
 def is_lower_high(ev, conf_i, t, price, c):
+    key = ("is_lower_high", t, c, len(ev), tuple(ev[-1]) if ev else None)
+    if key not in _MEMO:
+        _MEMO[key] = _is_lower_high(ev, conf_i, t, price, c)
+    return _MEMO[key]
+
+
+def _is_lower_high(ev, conf_i, t, price, c):
     """Zone at the high: in the leg swings known at the close of candle c, the last leg swing before the swing high
     at t is a low (the high is the top of the pullback after the low) and the leg high before that is higher (a LH)."""
     known = ev[:bisect.bisect_right(conf_i, c)][-240:]
@@ -424,6 +455,13 @@ def after_hh(ev, conf_i, t, c):
 
 
 def is_higher_low(ev, conf_i, t, price, c):
+    key = ("is_higher_low", t, c, len(ev), tuple(ev[-1]) if ev else None)
+    if key not in _MEMO:
+        _MEMO[key] = _is_higher_low(ev, conf_i, t, price, c)
+    return _MEMO[key]
+
+
+def _is_higher_low(ev, conf_i, t, price, c):
     """Mirror of is_lower_high: the last leg swing before the swing low at t is a high at least MIN_LEG % above it,
     and the leg low before that is lower (a HL)."""
     known = ev[:bisect.bisect_right(conf_i, c)][-240:]
