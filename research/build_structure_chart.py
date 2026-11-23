@@ -410,6 +410,9 @@ DEMAND_HL_ONLY, DEMAND_AFTER_HH = True, False
 DEMAND_SHARP_ATR = 1.5
 DEMAND_SHARP_K = 4        # candles after the swing low in which the rise must happen
 DEMAND_COUNTER_MSS_ENDS = False
+# DEMAND_SOFT: also keep the demand zones at a HL without the quick rise (sharp = 0), drawn dashed on the chart as
+# "HL without impulse": visual only, the backtests skip them (a slow climb from a HL gets run through much more often).
+DEMAND_SOFT = True
 
 
 def after_hh(ev, conf_i, t, c):
@@ -471,7 +474,7 @@ def demand_zones(df, n, bias, start):
         if (top - bot) / bot * 100 > WIDE_ZONE:                # a wide candle: the zone is its lower wick
             top = max(min(O[j], C[j]), bot * (1 + MIN_ZONE / 100))
         shown, end = demand_life(L, j, c, top, bot, t, bias, start, hl, need_bias=not hl or LH_BIAS)
-        if shown is not None and (sharp or DRAW_GREY):
+        if shown is not None and (sharp or DRAW_GREY or (DEMAND_SOFT and hl)):
             out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(hl), int(ahh)])
     return out
 
@@ -486,4 +489,4 @@ data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles":
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(demand)} demand zones,", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{sum(z[4] for z in demand)} demand zones + {sum(1 - z[4] for z in demand)} HL without impulse,", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
