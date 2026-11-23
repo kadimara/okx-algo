@@ -415,11 +415,52 @@ def demand_zones(df, n, bias, start):
 demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low)
 
 
-data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
+# Ranges (indecision), live: a range starts when the last RANGE_SWINGS confirmed 8-candle swings (alternating, a swing
+# replaced by a more extreme one dropped) lie within a band of less than RANGE_PCT %, from the confirmation of the last
+# of them. While it lasts the band follows the last RANGE_SWINGS swings; it ends at the first close outside the band or
+# when a new swing makes the band wider than RANGE_PCT %. No trades while a range is active.
+# Per candle: in a range at its close (bool). Boxes: [tFirstSwing, tActive, tEnd (None = still active), top, bottom]
+RANGE_SWINGS, RANGE_PCT = 3, 3.0
+
+
+def ranges(df, n, n_sw=None, pct=None):
+    n_sw, pct = n_sw or RANGE_SWINGS, pct or RANGE_PCT
+    close = df["close"].to_numpy(float)
+    ev = swing_events(df, n)
+    conf_i = [t_idx[p[3]] for p in ev]
+    events = sorted(set(conf_i))
+    active, boxes, cur = [False] * len(df), [], None
+    for e, c in enumerate(events):
+        c2 = events[e + 1] if e + 1 < len(events) else len(df)
+        known = ev[:bisect.bisect_right(conf_i, c)][-4 * n_sw:]
+        known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]][-n_sw:]
+        hi, lo = max(p[2] for p in known), min(p[2] for p in known)
+        if len(known) == n_sw and (hi / lo - 1) * 100 < pct:
+            if cur is None or cur[2] is not None:
+                cur = [known[0][0], T[c], None, hi, lo]
+                boxes.append(cur)
+            else:
+                cur[3], cur[4] = hi, lo                       # the band follows the last swings
+        elif cur is not None and cur[2] is None:
+            cur[2] = T[c]                                     # a new swing outside the band: the range ends
+        for k in range(c, c2):
+            if cur is None or cur[2] is not None:
+                break
+            if close[k] > cur[3] or close[k] < cur[4]:
+                cur[2] = T[k]
+                break
+            active[k] = True
+    return active, [[b[0], b[1], b[2], round(b[3], 1), round(b[4], 1)] for b in boxes]
+
+
+in_range, range_boxes = ranges(sig, LEG_N)
+
+
+data = {"supply": supply, "demand": demand, "ranges": range_boxes, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
         "legs": live_lab["legs"], "legLevels": live_lab["levels"],   # labels and MSS / MSB lines: the live leg swings
         "legsHind": legs, "legLevelsHind": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
         "legN": LEG_N, "minLeg": MIN_LEG}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
-print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(demand)} demand zones,", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")
+print({k: len(v) for k, v in lower.items()}, "lower MSS areas;", f"{sum(z[4] for z in supply)} sharp + {sum(1 - z[4] for z in supply)} grey supply zones ({sum(z[1] is None for z in supply if z[4])} / {sum(z[1] is None for z in supply if not z[4])} active),", f"{len(demand)} demand zones, {len(range_boxes)} ranges ({sum(in_range) / len(in_range) * 100:.0f}% of the candles),", f"{len(candles)} candles, {len(swings)} swings, {len(legs)} leg swings, swing {strat.n} candles, {len(page) / 1e6:.2f} MB")

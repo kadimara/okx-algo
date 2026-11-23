@@ -29,7 +29,7 @@ src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="u
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np, "bisect": bisect}
 for node in ast.parse(src).body:
     names = {getattr(e, "id", None) for t in getattr(node, "targets", []) for e in getattr(t, "elts", [t])}
-    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS"}:
+    if isinstance(node, ast.FunctionDef) or names & {"LEG_N", "SHARP_K", "DRAW_GREY", "WIDE_ZONE", "LH_BIAS", "SUPPLY_MIN_PCT", "SUPPLY_MSS_OK", "COUNTER_MSS_ENDS", "RANGE_SWINGS"}:
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)
@@ -73,7 +73,7 @@ MIN_STOP, WIDE_STOP, RISK = 0.5, 1.0, 1.0
 BE_TRIGGERS = (None, 1.0, 1.5, 2.0)
 
 
-def run(zones, entry, target, be=None, side="short", lim=1, keep_mss=False):
+def run(zones, entry, target, be=None, side="short", lim=1, keep_mss=False, rng=None):
     H, L, O, C, bias, start = SIDES[side]
     rows, skipped = [], 0
     for z in zones:
@@ -101,7 +101,7 @@ def run(zones, entry, target, be=None, side="short", lim=1, keep_mss=False):
                 break
             if (start[k] is not None and start[k] > t0) or (bias[k] >= 1 if keep_mss else bias[k] > -lim):
                 break                         # cancelled before a fill
-        if f is None:
+        if f is None or (rng is not None and rng[f - 1]):   # no trades while a range is active
             continue
         lo = L[j + 1:f].min() if target == "drop low" else x - FIXED_R * risk
         rr = (x - lo) / risk
@@ -258,5 +258,32 @@ for zn in (ns["LEG_N"], 12):
                         ("all", both)):
             zc = f"{len(SUP)}s/{len(DEM)}d" if name == "all" else ""
             print(f"{zn:>7}c {bname:>12} {zc:>14} {name:>12} " + (stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)) if len(g) else "     0"))
+        print()
+ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = False
+
+
+
+# Ranges: no trades while a range is active (RANGE_SWINGS swings within a band under X %), for both bias settings
+print("\nRange filter (no trades while a range is active), entry plan, target drop low:")
+print(f"{'bias':>9} {'filter':>14} {'group':>14} {'trades':>6} {'win':>5} {'avg R':>7} {'return':>8} {'compounded':>11} {'max DD':>7} {'worst run':>10}   per year")
+RNG = {"none": None}
+for n_sw, pct in ((3, 2.0), (3, 3.0), (3, 4.0), (4, 3.0)):
+    act, boxes = ns["ranges"](df, ns["LEG_N"], n_sw, pct)
+    RNG[f"{n_sw} sw < {pct:g}%"] = act
+    print(f"{'':>9} {f'{n_sw} sw < {pct:g}%':>14}: {len(boxes)} ranges, {sum(act) / len(act) * 100:.0f}% of the candles")
+for bname, mss in (("confirmed", False), ("MSS too", True)):
+    ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = mss
+    SUP, DEM = ns["supply_zones"](df, ns["LEG_N"], bias, start), ns["demand_zones"](df, ns["LEG_N"], bias, start_low)
+    for fname, act in RNG.items():
+        parts = {}
+        for side, zs in (("short", SUP), ("long", DEM)):
+            d, _ = run(zs, "plan", "drop low", side=side, lim=0.5 if mss else 1, rng=act)
+            d = d.dropna(subset=["r"]).assign(net=lambda x: x["r"] - 2 * FEE / x["risk_pct"])
+            d["hl"] = [z[5] for z in d["zone"]]
+            parts[side] = d
+        lo = parts["long"]
+        for name, g in (("shorts", parts["short"]), ("longs at a HL", lo[lo["hl"] == 1]), ("longs normal", lo[lo["hl"] == 0]),
+                        ("all", pd.concat(parts.values()).sort_values("time"))):
+            print(f"{bname:>9} {fname:>14} {name:>14} " + (stats(g["net"].reset_index(drop=True), g["time"].reset_index(drop=True)) if len(g) else "     0"))
         print()
 ns["SUPPLY_MSS_OK"] = ns["DEMAND_MSS_OK"] = False
