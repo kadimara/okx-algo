@@ -47,6 +47,10 @@ for name, (ns["SHARP_K"], ns["SHARP_ATR"]) in RULES.items():
     ZONES[name] = ns["supply_zones"](df, ns["LEG_N"], bias, start)
 
 MIN_RR, FEE, FIXED_R = 2, 0.05, 3     # FEE in % per side
+# Entry plan "plan": sell at the zone bottom, or at the body high of the zone candle when the zone-bottom stop would be
+# wider than WIDE_STOP %; stop at the zone top but at least MIN_STOP % from the entry. Sized to risk RISK % of the
+# account per trade (leverage = RISK / stop %).
+MIN_STOP, WIDE_STOP, RISK = 0.5, 1.0, 1.0
 
 
 def run(zones, entry, target):
@@ -59,9 +63,14 @@ def run(zones, entry, target):
         if H[e] < bot:                        # ended without a touch: no trade
             continue
         x = bot if entry == "zone" else (top + bot) / 2
+        if entry == "plan":
+            x = bot if (top - bot) / bot * 100 <= WIDE_STOP else max(O[j], C[j])
         risk = top - x
+        if entry == "plan":
+            risk = max(risk, MIN_STOP / 100 * x)
         if risk <= 0:
             continue
+        stop = x + risk
         f = None
         for k in range(e, len(df)):
             if H[k] >= x:
@@ -76,9 +85,9 @@ def run(zones, entry, target):
         if rr < MIN_RR - 1e-9:
             skipped += 1
             continue
-        stop_i = next((k for k in range(f, len(df)) if H[k] > top), None)
+        stop_i = next((k for k in range(f, len(df)) if H[k] >= stop), None)
         last = stop_i if stop_i is not None else len(df) - 1
-        hit = next((k for k in range(f + 1, last + 1) if L[k] <= lo and H[k] <= top), None)
+        hit = next((k for k in range(f + 1, last + 1) if L[k] <= lo and H[k] < stop), None)
         r = rr if hit is not None else (-1.0 if stop_i is not None else np.nan)
         rows.append({"time": df.index[f], "r": r, "risk_pct": risk / x * 100, "rr": rr, "zone": z})
     return pd.DataFrame(rows), skipped
@@ -121,3 +130,24 @@ for target in ("drop low", f"{FIXED_R}R"):
             lab = f"< {hi_b}%" if lo_b == 0 else f">= {lo_b}%" if hi_b == np.inf else f"{lo_b}-{hi_b}%"
             print(line(f"{entry} / {target} / {lab}", g))
         print()
+
+
+# The entry plan on the current rule, in % of the account (RISK % per trade, fees included)
+print(f"\nEntry plan on {cur}: entry at the zone bottom, or the body high when that stop is over {WIDE_STOP}%; stop at the "
+      f"zone top, at least {MIN_STOP}%; {RISK}% of the account at risk per trade.")
+for target in ("drop low", f"{FIXED_R}R"):
+    d, sk = run(ZONES[cur], "plan", target)
+    c = d.dropna(subset=["r"])
+    net = c["r"] - 2 * FEE / c["risk_pct"]
+    lev = RISK / c["risk_pct"]
+    eq = (1 + RISK / 100 * net).cumprod()
+    dd = (1 - eq / eq.cummax()).max() * 100
+    body = sum((z[2] - z[3]) / z[3] * 100 > WIDE_STOP for z in c["zone"])
+    print(f"  target {target:>8}: {len(d)} trades ({sk} skipped, {body} entered at the body high), "
+          f"{(c['risk_pct'] <= MIN_STOP + 1e-9).sum()} on the {MIN_STOP}% minimum stop; "
+          f"stop {c['risk_pct'].min():.2f}-{c['risk_pct'].max():.2f}% (median {c['risk_pct'].median():.2f}%), "
+          f"leverage {lev.min():.1f}-{lev.max():.1f}x (median {lev.median():.1f}x)")
+    print(f"  {'':>17} win {(net > 0).mean() * 100:.0f}%, avg {net.mean():+.2f}R, total {net.sum():+.1f}R = "
+          f"{net.sum() * RISK:+.1f}% simple, {(eq.iloc[-1] - 1) * 100:+.1f}% compounded, max drawdown {dd:.1f}%")
+    for y, g in c.assign(net=net).groupby(c["time"].dt.year):
+        print(f"  {'':>17} {y}: {len(g)} trades, {g['net'].sum() * RISK:+.1f}%")
