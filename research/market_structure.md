@@ -200,6 +200,11 @@ Example: the 8-candle high of 29 Sep 2026 (84,560, a leg of only 2.4 % into it, 
 
 Known quirk: when `merge_legs` removes a small leg it removes both of its swings, so for one rebuild a lower high can
 stand in for a higher one (25–26 Sep 2026: 84,341 replaced 85,256 until the next rebuild); such a zone then ends early.
+Fixed for supply zones (`ZONE_MERGE_EXTREME = "supply"`, 2026-11-24): the real-leg check of supply zones uses legs
+merged with MERGE_EXTREME (the most extreme swings stay); the structure, bias and demand zones keep the normal merge.
+The 25 Sep zone now lives until the fill (27 Sep 05:00) and wins +1.9R. Shorts confirmed trend +18.0 % -> +18.7 %
+(26 trades), chart rules +12.3 % -> +14.1 % (36 trades); demand unchanged (+31.8 % at a HL). With the fix for demand
+too (True), demand drops to +25.1 %.
 
 ## 7b. Demand zones (chart)
 

@@ -73,7 +73,9 @@ for hrs in LOWER_HOURS:
 # MERGE_EXTREME: when the smallest leg a -> b (between l and r: l, a, b, r) is merged, keep the most extreme swings
 # instead of always dropping a and b: if a is more extreme than r, drop b and r (keep l, a); else if b is more extreme
 # than l, drop l and a (keep b, r); else drop a and b as before. False = always drop a and b.
-LEG_N, MIN_LEG, LEG_RULE, RETRACE, MERGE_EXTREME = 8, 2.5, "pct", 10.0, False
+# ZONE_MERGE_EXTREME: the real-leg check of the zones (ZONE_REAL_LEG) uses legs merged with MERGE_EXTREME, so a zone does
+# not end when its swing briefly disappears; the structure and bias keep the normal merge. False / "supply" / True (both).
+LEG_N, MIN_LEG, LEG_RULE, RETRACE, MERGE_EXTREME, ZONE_MERGE_EXTREME = 8, 2.5, "pct", 10.0, False, "supply"
 # STRUCT_MODE: "structural" = breaks of the structural high / low (the levels that turn or continue the trend, see
 # structure); "swing" = breaks of the most recent swing high / low (a close above the last swing high is bullish, below
 # the last swing low bearish). Both on the same leg swings; MSS / MSB and the bias bar work the same.
@@ -108,7 +110,7 @@ def more_b(Q, x, y):
     return Q[x][2] > Q[y][2] if Q[x][1] == "h" else Q[x][2] < Q[y][2]
 
 
-def merge_legs(P, min_leg):
+def merge_legs(P, min_leg, extreme=None):
     """Remove the smallest leg that is too small again and again (ties: the leftmost); the first and last swing always
     stay. Too small: under min_leg % of the swing price (LEG_RULE "pct"), or under RETRACE % of the leg before it
     (LEG_RULE "retrace"; the size is then the ratio to the leg before). A heap of legs over a linked list (same result
@@ -147,7 +149,7 @@ def merge_legs(P, min_leg):
         l, r = prv[a], nxt[b]
         more = (lambda x, y: Q[x][2] > Q[y][2]) if Q[a][1] == "h" else (lambda x, y: Q[x][2] < Q[y][2])
         drop = (a, b)
-        if MERGE_EXTREME:
+        if (MERGE_EXTREME if extreme is None else extreme):
             if r < n and more(a, r):
                 drop = (b, r)                       # a stays the leg extreme (a lower high r does not replace it)
             elif prv[l] >= 0 and more_b(Q, b, l):
@@ -351,7 +353,9 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
         if SETTLED_LEGS and len(P) > 4:
             Ps = P[:-1] if leg_big_enough(P[:-1], P[-1][2]) else P[:-2]
         real = Ps if len(Ps) < 2 or leg_big_enough(Ps[:-1], Ps[-1][2]) else Ps[:-1]
-        legsets.append((c, {(q[0], q[1]) for q in real}))
+        Px = Ps if MERGE_EXTREME or not ZONE_MERGE_EXTREME else merge_legs(known[-window:], min_leg, extreme=True)
+        realx = Px if len(Px) < 2 or leg_big_enough(Px[:-1], Px[-1][2]) else Px[:-1]
+        legsets.append((c, {(q[0], q[1]) for q in real}, {(q[0], q[1]) for q in realx}))
         i0 = t_idx[P[0][0]]
         track = [] if labels else None
         st = structure(close, Ps, i0, c2, track)
@@ -401,7 +405,7 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
                     lv_msb[i] = [T[ext], round(float(L_[ext] if tr_ < 0 else H_[ext]), 1)]
     for b in breaks:
         b[3] = trend[b[0] - 1]
-    _MEMO[("legsets", n, min_leg, len(df), T[0], T[-1])] = ([x[0] for x in legsets], [x[1] for x in legsets])
+    _MEMO[("legsets", n, min_leg, len(df), T[0], T[-1])] = ([x[0] for x in legsets], [x[1] for x in legsets], [x[2] for x in legsets])
     out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
     if not labels:
         return out
@@ -715,9 +719,10 @@ def leg_ok_fn(df, n):
     key = ("legsets", n, MIN_LEG, len(df), T[0], T[-1])
     if key not in _MEMO:
         live_structure(df, n, MIN_LEG)
-    cs, sets = _MEMO[key]
+    cs, sets_n, sets_x = _MEMO[key]
 
     def ok(t, ty, k):
+        sets = sets_x if ZONE_MERGE_EXTREME is True or (ZONE_MERGE_EXTREME == "supply" and ty == "h") else sets_n
         r = bisect.bisect_right(cs, k) - 1
         return r >= 0 and (t, ty) in sets[r]
     return ok
