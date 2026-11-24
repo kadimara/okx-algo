@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from structure import analyze_bos_structure, bos_pivot_list
 
-REV_N, REV_MIN_LEG, DAYS = 4, 1.5, 730
+REV_N, REV_MIN_LEG, DAYS = 4, 1.0, 730
 # REV_POWER: a MSS (break against the trend) only counts on a powerful candle: its body in the break direction is at
 # least REV_POWER x ATR(14) (Wilder, as of the candle before). 0 = any close beyond the level. MSBs are unchanged.
 REV_POWER = 1.5
