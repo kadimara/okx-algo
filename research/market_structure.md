@@ -9,7 +9,7 @@ trends and breaks. Everything below is what the code does. Where the chart has a
 |---|---|---|
 | Data | OKX BTC-USD index, 1h candles | `data/BTC_1h_*_index_signal_*.csv` (download: `research/download_data.py`) |
 | Swing size `LEG_N` | 8 candles | a pivot must be the extreme of 8 candles on each side |
-| Minimum leg `MIN_LEG` | 2.5 % | smaller legs are merged away |
+| Minimum leg `LEG_ATR`, `LEG_ATR_LEN` | 4 × ATR(720) | since 2026-11-24 a leg must be at least 4 × the 30-day ATR (1h, Wilder) in % of the close, as of the swing the leg starts from (about 2–4.5 %; see §1e). `LEG_ATR = 0` gives the fixed `MIN_LEG` (2.5 %) |
 | Break rule | **close** | only a candle close beyond a level breaks it; a wick through it does not |
 | Naming | MSB / MSS | **MSB** = market structure break (continuation; elsewhere BoS), **MSS** = market structure shift (reversal; elsewhere CHoCH) |
 
@@ -48,6 +48,40 @@ else drop l and a when b is more extreme than l, else a and b as before. Over 4 
 the same (411 trend changes, 6.0 MSS / month); fewer temporary swings (live labels 60 -> 50 / month). Backtests
 (with ZONE_REAL_LEG): shorts confirmed trend +18.0 % -> +18.7 %, shorts chart rules +12.3 % -> +14.1 %, but demand
 at a HL +31.8 % -> +25.1 % and all demand zones +36.4 % -> +30.8 %. Mixed, so it stays off.
+
+### 1e. ATR-based minimum leg (2026-11-24, default)
+The fixed 2.5 % treats quiet and wild periods the same. With `LEG_ATR > 0` the minimum leg is `LEG_ATR` × ATR(`LEG_ATR_LEN`)
+in % of the close at the leg's first swing (that swing's pivot candle, so it is known at its confirmation: no hindsight).
+`merge_legs` then removes the leg that is smallest **relative to its own minimum**; `leg_big_enough` (real legs, zones at a
+LH / HL) uses the same minimum. With a fixed minimum both give exactly the old result.
+
+The 30-day ATR is 0.5–1.1 % of price (median 0.72 %), so 4 × gives a minimum leg of about 2.0 % (2023, 2026) to 4.5 % (2021).
+
+Test (BTC 1h index, Jan 2020 → Nov 2026, all live; `backtest_leg_structure.py`, `backtest_zone_rules.py`, `backtest_demand.py`):
+
+| min leg | leg swings | MSS | follow the bias (0.05 %) | shorts, confirmed trend | demand at a HL (chart rule) | all demand zones |
+|---|---|---|---|---|---|---|
+| **2.5 % fixed (old)** | 2,276 | 737 | +576 % | 46 trades, +22.9 %, DD 8.9 % | 77, +19.9 %, DD 12.8 % | 91, +20.8 %, DD 14.4 % |
+| 2.8 % fixed | 1,988 | 727 | +835 % | 35, +4.3 % | 68, +28.1 % | 80, +31.3 % |
+| 3.0 % fixed | 1,794 | 689 | +406 % | 32, −7.3 % | 62, +30.5 % | 72, +25.7 % |
+| 3.5 % fixed | 1,472 | 661 | +1,659 % | 29, −3.8 % | 49, +15.9 % | 54, +10.3 % |
+| 3.0 × ATR 168 / 336 / 720 | ~2,560 | ~780 | +1,133 … +2,268 % | −10.6 … −1.0 % | −9.0 … +5.3 % | −15.6 … −1.2 % |
+| 3.5 × ATR 168 / 336 / 720 | ~2,100 | ~760 | +1,367 … +2,644 % | +9.0 … +18.2 % | +3.6 … +15.2 % | −2.1 … +7.5 % |
+| 4.0 × ATR 168 | 1,694 | 715 | +3,698 % | 33, +12.7 % | 54, +18.1 % | 61, +10.1 % |
+| 4.0 × ATR 336 | 1,710 | 721 | +2,417 % | 35, +18.2 % | 59, +18.9 % | 66, +10.9 % |
+| **4.0 × ATR 720 (default)** | 1,746 | 702 | +1,264 % | 40, **+25.9 %**, DD 8.7 % | 56, **+33.8 %**, DD 10.6 %, 1 losing year | 66, **+35.1 %**, DD 12.5 % |
+| 4.0 × ATR 1440 | 1,774 | 686 | +1,970 % | 38, +25.0 %, DD 7.8 % | 60, +21.4 % | 69, +23.8 % |
+| 4.0 × ATR 2160 | 1,776 | 668 | +3,528 % | 39, +23.9 %, DD 6.8 % | 61, +22.1 % | 68, +20.1 % |
+| 4.5 × ATR 336 / 720 / 1440 | ~1,460 | ~660 | +713 … +2,201 % | +24.0 … +24.8 % | +10.2 … +39.9 % | +10.4 … +44.5 % |
+| 5.0 × ATR 720 | 1,226 | 603 | +1,583 % | – | 35, +17.2 % | 41, +23.0 % |
+
+(1 % risk per trade, after fees; "follow the bias" = the leg-structure script's "new, hold old trend while grey" with 0.05 % fee per side.)
+
+- Every ATR setting follows the trend better than the fixed 2.5 % (+576 %), and 4 × ATR(720) is better in every year (2020 +176 vs +147 %, 2024 −26 vs −37 %).
+- A larger *fixed* leg helps the demand zones but costs the shorts. 4 × ATR keeps the shorts and improves demand: the volatility scaling does something a fixed % does not.
+- 3–3.5 × ATR (about as many swings as 2.5 %) is worse for the zones. From 4 × with a 30–90 day ATR the zones are as good or better with a lower drawdown.
+- **Caveat:** the zone results jump between neighbouring settings (4.5 × ATR(720) +39.9 % vs 4.5 × ATR(1440) +10.2 % for demand). 4 × ATR(720) is the best of the 4 × row, so expect the lower end of that row (+20–25 %) going forward. Zone rules were tuned on the 2.5 % structure and were not re-tuned.
+- In the chart (last 2 years only) the ATR starts at the first candle of that window, so the first weeks of the view use a less settled ATR.
 
 ## 2. Structural swings, ranges and levels
 

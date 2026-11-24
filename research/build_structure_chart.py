@@ -71,15 +71,35 @@ for hrs in LOWER_HOURS:
 # ZONE_MERGE_EXTREME: the real-leg check of the zones (ZONE_REAL_LEG) uses legs merged with the most extreme swings kept
 # (merge_legs extreme=True), so a zone does not end when its swing briefly disappears; the structure and bias keep the
 # normal merge. False / "supply" / True (both sides).
-LEG_N, MIN_LEG, ZONE_MERGE_EXTREME = 8, 2.5, "supply"
+# LEG_ATR: the minimum leg follows volatility. 0 = a fixed MIN_LEG %. Otherwise a leg must be at least LEG_ATR x the
+# ATR(LEG_ATR_LEN) in % of the close, as of the swing the leg starts from (known by its confirmation, no hindsight).
+LEG_N, MIN_LEG, ZONE_MERGE_EXTREME, LEG_ATR, LEG_ATR_LEN = 8, 2.5, "supply", 4.0, 720
 # STRUCT_MODE: "structural" = breaks of the structural high / low (the levels that turn or continue the trend, see
 # structure); "swing" = breaks of the most recent swing high / low (a close above the last swing high is bullish, below
 # the last swing low bearish). Both on the same leg swings; MSS / MSB and the bias bar work the same.
 STRUCT_MODE = "structural"
 
 
+def leg_atr_setup(df):
+    """ATR(LEG_ATR_LEN) in % of the close per candle, for the ATR-based minimum leg (stored in _MEMO)."""
+    if not LEG_ATR:
+        return
+    key = ("leg_atrp", LEG_ATR_LEN, len(df), T[0], T[-1])
+    if _MEMO.get("leg_atrp_key") != key:
+        _MEMO["leg_atrp_key"] = key
+        H, L, C = (df[k].to_numpy(float) for k in ("high", "low", "close"))
+        tr = np.maximum(H, np.r_[C[0], C[:-1]]) - np.minimum(L, np.r_[C[0], C[:-1]])   # as wilder_atr below
+        _MEMO["leg_atrp"] = pd.Series(tr).ewm(alpha=1 / LEG_ATR_LEN, adjust=False).mean().to_numpy() / C * 100
+
+
+def leg_min(t, min_leg):
+    """The minimum leg in % for a leg that starts at the swing with pivot time t: min_leg, or LEG_ATR x ATR %."""
+    return LEG_ATR * _MEMO["leg_atrp"][t_idx[t]] if LEG_ATR else min_leg
+
+
 def base_swings(df, n):
     """The 8-candle break-structure swings: [pivot time, "h" | "l", price, confirmed time]."""
+    leg_atr_setup(df)
     base = bos_pivot_list(df, analyze_bos_structure(df, n))
     return [[ts(r.pivot_time), r.type[0], float(r.price), ts(r.confirmed_at)] for r in base.itertuples()]
 
@@ -87,6 +107,7 @@ def base_swings(df, n):
 def swing_events(df, n):
     """Every swing as it was confirmed, in confirmation order, including the ones a more extreme swing of the same
     type replaced later (base_swings has dropped those, which is hindsight): [pivot time, "h" | "l", price, confirmed]."""
+    leg_atr_setup(df)
     ev = analyze_bos_structure(df, n).attrs.get("events", [])
     return [[T[pi], ty[0], float(price), T[ci]] for pi, ci, ty, _, price, _ in ev]
 
@@ -112,8 +133,9 @@ def merge_legs(P, min_leg, extreme=False):
     if n < 4:
         return Q
     nxt, prv, alive = list(range(1, n + 1)), list(range(-1, n - 1)), [True] * n
-    size = lambda a, b: abs(Q[b][2] - Q[a][2]) / Q[a][2] * 100
-    heap = [(size(i, i + 1), i, i + 1) for i in range(1, n - 2) if size(i, i + 1) < min_leg]
+    # leg size relative to its minimum (min_leg %, or LEG_ATR x ATR % at the leg's first swing): < 1 is too small
+    size = lambda a, b: abs(Q[b][2] - Q[a][2]) / Q[a][2] * 100 / leg_min(Q[a][0], min_leg)
+    heap = [(size(i, i + 1), i, i + 1) for i in range(1, n - 2) if size(i, i + 1) < 1]
     heapq.heapify(heap)
     while heap:
         _, a, b = heapq.heappop(heap)
@@ -134,7 +156,7 @@ def merge_legs(P, min_leg, extreme=False):
             prv[R_] = L_
         if prv[L_] >= 0 and R_ < n - 1:             # the new leg L_ -> R_
             v = size(L_, R_)
-            if v < min_leg:
+            if v < 1:
                 heapq.heappush(heap, (v, L_, R_))
     out, i = [], 0
     while i < n:
@@ -144,8 +166,8 @@ def merge_legs(P, min_leg, extreme=False):
 
 
 def leg_big_enough(prev, price):
-    """Is the leg from the last leg swing in prev to price a full leg (>= MIN_LEG %)?"""
-    return abs(price / prev[-1][2] - 1) * 100 >= MIN_LEG
+    """Is the leg from the last leg swing in prev to price a full leg (>= MIN_LEG %, or LEG_ATR x ATR %)?"""
+    return abs(price / prev[-1][2] - 1) * 100 >= leg_min(prev[-1][0], MIN_LEG)
 
 
 def structure(close, P, i0, i1, track=None):
@@ -360,7 +382,7 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
                     lv_msb[i] = [T[ext], round(float(L_[ext] if tr_ < 0 else H_[ext]), 1)]
     for b in breaks:
         b[3] = trend[b[0] - 1]
-    _MEMO[("legsets", n, min_leg, len(df), T[0], T[-1])] = ([x[0] for x in legsets], [x[1] for x in legsets], [x[2] for x in legsets])
+    _MEMO[("legsets", n, min_leg, LEG_ATR, LEG_ATR_LEN, len(df), T[0], T[-1])] = ([x[0] for x in legsets], [x[1] for x in legsets], [x[2] for x in legsets])
     out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
     if not labels:
         return out
@@ -494,7 +516,7 @@ def supply_zones(df, n, bias, start, shown_out=None):
 def leg_ok_fn(df, n):
     """ok(t, ty, k): is the swing (pivot time t, type ty) a real leg swing in the latest live rebuild at or before candle k
     (ZONE_REAL_LEG)?"""
-    key = ("legsets", n, MIN_LEG, len(df), T[0], T[-1])
+    key = ("legsets", n, MIN_LEG, LEG_ATR, LEG_ATR_LEN, len(df), T[0], T[-1])
     if key not in _MEMO:
         live_structure(df, n, MIN_LEG)
     cs, sets_n, sets_x = _MEMO[key]
@@ -703,7 +725,7 @@ data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles":
         "demandTrades": zone_trades(sig, demand, "long", leg_bias, swing_start_low, 0.5 if DEMAND_MSS_OK else 1,
                                     keep_mss=not DEMAND_COUNTER_MSS_ENDS),
         "legsHind": legs, "legLevelsHind": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
-        "legN": LEG_N, "minLeg": MIN_LEG}
+        "legN": LEG_N, "minLeg": MIN_LEG, "legAtr": LEG_ATR}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
