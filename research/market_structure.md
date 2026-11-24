@@ -109,6 +109,31 @@ Internal swings are drawn faded.
   - After an MSS the bias is **grey** (±0.5) until the new trend makes its first MSB; that MSB confirms the new trend.
   - If price instead breaks back in the old direction first, the MSS **failed** and the bias returns to the old trend's colour from that close.
 
+## 6b. Body-break structure (option, `STRUCT_MODE = "body"`)
+
+An alternative structure, built causally in one pass (`body_structure`), so live = hindsight:
+- **Swings:** pure 8-candle swings (§1a, §1b), with no 2.5 % leg merge.
+- **Levels:** the structural high / low as in §2–§3, but the level is the **body edge** of the swing candle: max(open, close) for a high, min(open, close) for a low.
+- **Break (MSB / MSS):** the first candle whose **open and close** are both beyond the level. A wick, or a candle that opens inside and closes beyond, is not a break.
+- **Swing at a break:** the extreme of the leg into the break (the lowest low since the broken high, or the highest high since the broken low) becomes the new HL / LH. It is inserted as a swing if it isn't one.
+  - `EARLY_SWING = "break"`: at the break candle.
+  - `EARLY_SWING = "wait"`: once that extreme is 8 candles old, so a pullback shows first. Until then that side has no level.
+- **Sweep (×, chart only):** the first wick beyond a structural swing's wick without a body break, and with no break within 3 candles.
+
+Test (2026-11-24, 4 years of data, 1 % risk per trade):
+
+| | current (2.5 %, close) | body, break | body, wait |
+|---|---|---|---|
+| swings / month | 60 | 58 | 57 |
+| breaks / month (MSS) | 12.4 (6.0) | 24.8 (13.0) | 24.3 (12.4) |
+| MSS reversed within 24h | 4 % | 30 % | 28 % |
+| shorts, confirmed bearish trend | +21.6 % (DD 6.8 %) | +1.7 % (DD 14.1 %) | +6.4 % (DD 11.1 %) |
+| longs at a HL (zone-rules script) | +8.2 % | +15.6 % | +15.6 % |
+| demand chart rule at a HL | +27.1 % (DD 5.6 %) | +6.2 % | +10.9 % |
+| demand chart rule, all zones | +5.6 % | +13.8 % | +16.6 % (DD 10.1 %) |
+
+The zone rules were tuned on the current structure. The default stays `"structural"`.
+
 ## 7. Supply zones (chart)
 
 - **The zone:** each 8-candle swing high, as confirmed live, spanning the full high-to-low range of the candle that made the high. A candle taller than 1 % (`WIDE_ZONE`) gives only its upper wick: from the high down to the body high (the higher of open and close), at least 0.5 % tall (`MIN_ZONE`). The sharp-drop test below still uses the candle low.

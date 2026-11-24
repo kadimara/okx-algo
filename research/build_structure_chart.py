@@ -74,7 +74,11 @@ LEG_N, MIN_LEG, LEG_RULE, RETRACE = 8, 2.5, "pct", 10.0
 # STRUCT_MODE: "structural" = breaks of the structural high / low (the levels that turn or continue the trend, see
 # structure); "swing" = breaks of the most recent swing high / low (a close above the last swing high is bullish, below
 # the last swing low bearish). Both on the same leg swings; MSS / MSB and the bias bar work the same.
-STRUCT_MODE = "structural"
+# "body" = the body-break structure (body_structure): pure 8-candle swings (no MIN_LEG merge), a break is the first candle
+# whose open AND close are beyond the body edge of the structural swing candle, causal in one pass (live = hindsight).
+# EARLY_SWING (body mode): at a break the extreme of the leg into it becomes the HL / LH: "break" = at the break candle,
+# "wait" = only once that extreme is LEG_N candles old (a pullback must show first).
+STRUCT_MODE, EARLY_SWING = "structural", "wait"
 
 
 def base_swings(df, n):
@@ -86,6 +90,8 @@ def base_swings(df, n):
 def swing_events(df, n):
     """Every swing as it was confirmed, in confirmation order, including the ones a more extreme swing of the same
     type replaced later (base_swings has dropped those, which is hindsight): [pivot time, "h" | "l", price, confirmed]."""
+    if STRUCT_MODE == "body":
+        return [list(e) for e in body_structure(df, n)["events"]]
     ev = analyze_bos_structure(df, n).attrs.get("events", [])
     return [[T[pi], ty[0], float(price), T[ci]] for pi, ci, ty, _, price, _ in ev]
 
@@ -276,6 +282,9 @@ def relabel(rows):
 
 def leg_swings(df, n, min_leg):
     """The leg swings and structure as drawn now, with hindsight (labels, current MSS / MSB)."""
+    if STRUCT_MODE == "body":
+        r = body_structure(df, n)
+        return body_labels(r), r["levels"], r["trend"], r["breaks"]
     P = merge_legs(base_swings(df, n), min_leg)
     st = structure(df["close"].to_numpy(float), P, 0, len(df))
     return label_swings(P, st["keep"]), structure_levels(df, P, st, len(df)), st["bias"], st["breaks"]
@@ -289,6 +298,10 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
     the same for the latest settled leg low (for the demand zones), as a fourth value. With labels also, last, the live
     labels and levels: every swing that was part of the live legs, labelled as in the last rebuild it was part of
     (swings merged away later stay), and the MSS / MSB of the structure at the last candle."""
+    if STRUCT_MODE == "body":
+        r = body_structure(df, n)
+        out = (r["trend"], r["breaks"], r["start"], r["start_low"]) if low_start else (r["trend"], r["breaks"], r["start"])
+        return out + ({"legs": body_labels(r), "levels": r["levels"]},) if labels else out
     close = df["close"].to_numpy(float)
     ev = swing_events(df, n)
     conf_i = [t_idx[p[3]] for p in ev]                      # ev is in confirmation order
@@ -319,6 +332,184 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
         b[3] = trend[b[0] - 1]
     out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
     return out + ({"legs": relabel(sorted(lab.values())), "levels": levels},) if labels else out
+
+
+_MEMO = {}   # results of body_structure and of is_lower_high / is_higher_low per swing (the backtests ask the same swings for many variants)
+
+
+def body_structure(df, n, early=None):
+    """The body-break structure in one causal pass (what is known at each close; nothing is rebuilt later):
+    - swings: 8-candle pivots (strictly above / below the n candles before, at least equal to the n after), known n
+      candles after the pivot, alternating (a more extreme swing of the same type replaces the last one), no leg merge;
+    - levels: the structural high / low as in structure() (after a bullish break the next swing high is the HH, the first
+      swing low after it the HL; bearish mirrored), but a level is the BODY edge of its swing candle (max / min of open
+      and close) and a break is the first candle with its open and its close beyond it;
+    - at a break the extreme of the leg into it (lowest low since the broken high's candle, bullish; highest high,
+      bearish) becomes the new structural low / high, inserted as a swing if it is none: at the break (early "break")
+      or once it is n candles old ("wait"; until then that side has no level).
+    Also returns sweeps: the first candle that trades beyond a structural swing's wick without breaking its body edge.
+    Result dict: trend, breaks [candle, dir, level, trend before], start, start_low, swings (rows [t, ty, price, conf,
+    structural]), events [t, ty, price, conf] in confirmation order, levels (as structure_levels), sweeps."""
+    early = early or EARLY_SWING
+    key = ("body", n, early, len(df), T[0], T[-1])
+    if key in _MEMO:
+        return _MEMO[key]
+    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    hs, ls = df["high"], df["low"]
+    hmax, lmin = hs.rolling(n).max(), ls.rolling(n).min()
+    ph = ((hs > hmax.shift(1)) & (hs >= hmax.shift(-n))).to_numpy()
+    pl = ((ls < lmin.shift(1)) & (ls <= lmin.shift(-n))).to_numpy()
+    top, bot = np.maximum(O, C), np.minimum(O, C)
+    size = len(df)
+    S, events, breaks, sweeps = [], [], [], []      # swing rows: [candle, "h" | "l", price, conf candle, structural]
+    trend, need, hi, lo, since_hi, since_lo, brk = 0, None, None, None, None, None, 0
+    swept = set()
+    pend = None                                     # wait mode: [type, candle of the broken level] of the pending extreme
+    out_trend, start, start_low = [0] * size, [None] * size, [None] * size
+
+    def add(j, ty, i):
+        """Confirm candle j as a swing of type ty at close i (alternation); returns the row or None if ignored."""
+        if S and j <= S[-1][0]:
+            return None
+        nonlocal hi, lo, since_hi, since_lo
+        if S and S[-1][1] == ty:
+            if (H[j] > S[-1][2]) if ty == "h" else (L[j] < S[-1][2]):
+                old = S[-1]
+                S[-1] = [j, ty, H[j] if ty == "h" else L[j], i, False]
+                if hi is old or lo is old:              # a more extreme swing replaces a structural one: it takes its place
+                    S[-1][4] = True
+                    hi, lo = (S[-1], lo) if hi is old else (hi, S[-1])
+                since_hi = S[-1] if since_hi is old else since_hi
+                since_lo = S[-1] if since_lo is old else since_lo
+                events.append(S[-1])
+                return None if S[-1][4] else S[-1]
+            return None
+        S.append([j, ty, H[j] if ty == "h" else L[j], i, False])
+        events.append(S[-1])
+        return S[-1]
+
+    def place(e, ty, i):
+        """The extreme candle e of a leg into a break as a swing of type ty (confirmed at i): an existing swing at e, or
+        it replaces the swing of that type in its segment of the swing list, or it is inserted there."""
+        for r in reversed(S):
+            if r[0] == e and r[1] == ty:
+                return r
+            if r[0] < e:
+                break
+        row = [e, ty, H[e] if ty == "h" else L[e], i, False]
+        k = next((k for k in range(len(S) - 1, -1, -1) if S[k][0] < e), -1)      # last swing before e
+        nxt_ = S[k + 1] if k + 1 < len(S) else None
+        if k >= 0 and S[k][1] == ty:                    # same segment as the swing before: replace it
+            S[k] = row
+        elif nxt_ is not None and nxt_[1] == ty:        # same segment as the swing after: replace that one
+            S[k + 1] = row
+        else:
+            S.insert(k + 1, row)
+        events.append(row)
+        return row
+
+    def extreme(ty, a, i):
+        seg = (L if ty == "l" else H)[a + 1:i + 1]
+        return a + 1 + int(seg.argmin() if ty == "l" else seg.argmax())
+
+    def set_level(row):
+        nonlocal hi, lo
+        row[4] = True
+        if row[1] == "l":
+            lo = row
+        else:
+            hi = row
+
+    for i in range(size):
+        # 1. breaks of the levels known before this candle (body beyond the body edge)
+        if hi is not None and bot[i] > top[hi[0]]:
+            breaks.append([i, 1, float(top[hi[0]]), trend])
+            a = hi[0]
+            trend, hi, need, since_lo, brk = 1, None, None, None, i
+            lo, since_hi, pend = None, None, None
+            e = extreme("l", a, i)
+            if early == "break" or e + n <= i:
+                set_level(place(e, "l", i))
+            else:
+                pend = ["l", a]
+        elif lo is not None and top[i] < bot[lo[0]]:
+            breaks.append([i, -1, float(bot[lo[0]]), trend])
+            a = lo[0]
+            trend, lo, need, since_hi, brk = -1, None, None, None, i
+            hi, since_lo, pend = None, None, None
+            e = extreme("h", a, i)
+            if early == "break" or e + n <= i:
+                set_level(place(e, "h", i))
+            else:
+                pend = ["h", a]
+        # sweeps: a wick beyond the structural swing's wick, no body break (first time per level)
+        for row, up in ((hi, True), (lo, False)):
+            if row is not None and id(row) not in swept and ((H[i] > row[2]) if up else (L[i] < row[2])) and i > row[3]:
+                swept.add(id(row))
+                sweeps.append([T[i], "h" if up else "l", round(float(H[i] if up else L[i]), 1), T[row[0]]])
+        # 2. wait mode: the pending extreme once it is n candles old
+        if pend is not None:
+            e = extreme(pend[0], pend[1], i)
+            if e + n <= i:
+                set_level(place(e, pend[0], i))
+                pend = None
+        # 3. swings confirmed at this close
+        p = i - n
+        new = []
+        if p >= 0 and ph[p]:
+            r = add(p, "h", i)
+            if r is not None:
+                new.append(r)
+        if p >= 0 and pl[p]:
+            r = add(p, "l", i)
+            if r is not None:
+                new.append(r)
+        for r in new:
+            if pend is not None and r[1] == pend[0]:
+                continue                                # the pending extreme decides that side
+            if r[1] == "h":
+                if hi is None or need == "h" or hi is r:
+                    if hi is not r:
+                        set_level(r)
+                    since_hi = None
+                    need = "l" if trend > 0 else None
+                elif since_lo is None or r[2] > since_lo[2]:
+                    since_lo = r
+            else:
+                if lo is None or need == "l" or lo is r:
+                    if lo is not r:
+                        set_level(r)
+                    since_lo = None
+                    need = "h" if trend < 0 else None
+                elif since_hi is None or r[2] < since_hi[2]:
+                    since_hi = r
+        out_trend[i] = trend
+        highs = [r for r in S[-6:-2] if r[1] == "h"]
+        lows = [r for r in S[-6:-2] if r[1] == "l"]
+        start[i] = T[highs[-1][0]] if highs else (start[i - 1] if i else None)
+        start_low[i] = T[lows[-1][0]] if lows else (start_low[i - 1] if i else None)
+    bk = {1: [T[b[0]] for b in breaks if b[1] > 0], -1: [T[b[0]] for b in breaks if b[1] < 0]}
+    sweeps = [w for w in sweeps                       # a wick that a real break follows within 3 candles is no sweep
+              if not any(w[0] <= t <= w[0] + 3 * (T[1] - T[0]) for t in bk[1 if w[1] == "h" else -1])]
+    mss, msb = (hi, lo) if trend < 0 else (lo, hi)
+    lvl = lambda r: [T[r[0]], round(float(top[r[0]] if r[1] == "h" else bot[r[0]]), 1)]
+    if msb is None:
+        seg = (L if trend < 0 else H)[brk:]
+        j = brk + int(seg.argmin() if trend < 0 else seg.argmax())
+        msb = [T[j], round(float((L if trend < 0 else H)[j]), 1)]
+    else:
+        msb = lvl(msb)
+    res = {"trend": out_trend, "breaks": breaks, "start": start, "start_low": start_low,
+           "swings": [[T[r[0]], r[1], float(r[2]), T[r[3]], r[4]] for r in S],
+           "events": [[T[r[0]], r[1], float(r[2]), T[r[3]]] for r in events],
+           "levels": {"trend": trend, "mss": None if mss is None else lvl(mss), "msb": msb}, "sweeps": sweeps}
+    _MEMO[key] = res
+    return res
+
+
+def body_labels(res):
+    """Chart rows [pivot time, type, label, price, confirmed time, internal] of the body structure."""
+    return relabel([[t, ty, "", round(price, 1), conf, not s] for t, ty, price, conf, s in res["swings"]])
 
 
 def bias_bar(trend, breaks):
@@ -386,7 +577,6 @@ def wilder_atr(df, length=14):
     return pd.Series(tr).ewm(alpha=1 / length, adjust=False).mean().to_numpy()
 
 
-_MEMO = {}   # results of is_lower_high / is_higher_low per swing (the backtests ask the same swings for many variants)
 
 
 def is_lower_high(ev, conf_i, t, price, c):
@@ -401,8 +591,8 @@ def _is_lower_high(ev, conf_i, t, price, c):
     at t is a low (the high is the top of the pullback after the low) and the leg high before that is higher (a LH)."""
     known = ev[:bisect.bisect_right(conf_i, c)][-240:]
     known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
-    prev = [p for p in merge_legs(known[-120:], MIN_LEG) if p[0] < t]
-    if not prev or prev[-1][1] != "l" or not leg_big_enough(prev, price):
+    prev = [p for p in merge_legs(known[-120:], 0 if STRUCT_MODE == "body" else MIN_LEG) if p[0] < t]
+    if not prev or prev[-1][1] != "l" or (STRUCT_MODE != "body" and not leg_big_enough(prev, price)):
         return False                                           # no full leg (>= MIN_LEG %) up from the low into it
     highs = [p for p in prev if p[1] == "h"]
     return bool(highs) and price < highs[-1][2]
@@ -496,8 +686,8 @@ def _is_higher_low(ev, conf_i, t, price, c):
     and the leg low before that is lower (a HL)."""
     known = ev[:bisect.bisect_right(conf_i, c)][-240:]
     known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
-    prev = [p for p in merge_legs(known[-120:], MIN_LEG) if p[0] < t]
-    if not prev or prev[-1][1] != "h" or not leg_big_enough(prev, price):
+    prev = [p for p in merge_legs(known[-120:], 0 if STRUCT_MODE == "body" else MIN_LEG) if p[0] < t]
+    if not prev or prev[-1][1] != "h" or (STRUCT_MODE != "body" and not leg_big_enough(prev, price)):
         return False
     lows = [p for p in prev if p[1] == "l"]
     return bool(lows) and price > lows[-1][2]
@@ -550,7 +740,8 @@ demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low)
 data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
         "legs": live_lab["legs"], "legLevels": live_lab["levels"],   # labels and MSS / MSB lines: the live leg swings
         "legsHind": legs, "legLevelsHind": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
-        "legN": LEG_N, "minLeg": MIN_LEG}
+        "legN": LEG_N, "minLeg": MIN_LEG, "structMode": STRUCT_MODE,
+        "sweeps": body_structure(sig, LEG_N)["sweeps"] if STRUCT_MODE == "body" else []}
 page = (HERE / "template_structure.html").read_text(encoding="utf-8").replace(
     "__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "ms_structure_chart.html").write_text(page, encoding="utf-8")
