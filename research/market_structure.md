@@ -1,0 +1,141 @@
+# Market structure: definitions and rules
+
+How the BTC leg structure on the chart (`research/build_structure_chart.py`, `structure.py`) defines swings,
+trends and breaks. Everything below is what the code does. Where the chart has a known inconsistency it is noted.
+
+## Settings
+
+| Setting | Value | Meaning |
+|---|---|---|
+| Data | OKX BTC-USD index, 1h candles | `data/BTC_1h_*_index_signal_*.csv` (download: `research/download_data.py`) |
+| Swing size `LEG_N` | 8 candles | a pivot must be the extreme of 8 candles on each side |
+| Minimum leg `MIN_LEG` | 2.5 % | smaller legs are merged away |
+| Break rule | **close** | only a candle close beyond a level breaks it; a wick through it does not |
+| Naming | MSB / MSS | **MSB** = market structure break (continuation; elsewhere BoS), **MSS** = market structure shift (reversal; elsewhere CHoCH) |
+
+## 1. Swing high and swing low
+
+### 1a. Pivot (raw swing)
+A candle `p` is a **swing high** when:
+- its high is **strictly higher** than the highs of the 8 candles before it, **and**
+- its high is **higher than or equal to** the highs of the 8 candles after it.
+
+A **swing low** mirrors this: its low is strictly lower than the 8 lows before it and lower than or equal to the 8 lows after it.
+
+A pivot is **confirmed** 8 candles after the pivot candle, at the close of candle `p + 8`. Before that it is unknown.
+
+### 1b. Alternating swings
+The swings must alternate high, low, high, low:
+- A new swing high is only accepted when the last swing was a low, **or** when it is higher than the current swing high. In that case it replaces it as the same leg's high.
+- A swing low works the same way: accepted after a high, or when lower than the current swing low (replacing it).
+
+### 1c. Swings created at a break (internal fill)
+Sometimes a close breaks the last swing low (see §3) while the last swing is still a low, so no swing high has been confirmed since. The highest high between that low and the breaking candle is then inserted as a swing high, confirmed at the break. The bullish case mirrors this: the lowest low is inserted as a swing low. This keeps the alternation intact when price breaks before a normal pivot forms.
+
+### 1d. Leg swings (minimum 2.5 %)
+The base swings from 1a–1c are reduced to **leg swings**:
+1. Measure every leg (swing to next swing) in %, except the first and the last leg.
+2. Take the smallest leg under 2.5 % and remove both of its swings.
+3. Where two swings of the same type now follow each other, keep the more extreme one: the higher high or the lower low.
+4. Repeat until every leg is at least 2.5 %.
+
+The first and last swing always stay; the last leg is still forming.
+
+## 2. Structural swings, ranges and levels
+
+At any time the structure has **one structural high** and **one structural low**. Together they form the current range. All other swings inside that range are **internal**: they break nothing and are drawn faded.
+
+The two levels have names depending on the trend:
+
+| | Uptrend | Downtrend |
+|---|---|---|
+| **MSB level** (market structure break, continuation) | the structural high = the last **HH** | the structural low = the last **LL** |
+| **MSS level** (market structure shift, turns the trend) | the structural low = the last **HL** | the structural high = the last **LH** |
+
+While the leg after a break has no swing yet, the MSB line on the chart is drawn at the extreme since the break: the highest high in an uptrend, the lowest low in a downtrend.
+
+## 3. Breaks: MSB and MSS
+
+A **break** is a candle **close** beyond a structural level. Closing exactly on the level, or only wicking through it, is not a break.
+
+| Event | Condition | Effect |
+|---|---|---|
+| **MSB up** (market structure break, continuation) | uptrend, close **above** the structural high (HH) | trend stays up, a new leg starts |
+| **MSB down** | downtrend, close **below** the structural low (LL) | trend stays down |
+| **MSS up** (market structure shift; elsewhere called CHoCH) | downtrend, close **above** the structural high (the LH = MSS level) | trend turns **up** |
+| **MSS down** | uptrend, close **below** the structural low (the HL = MSS level) | trend turns **down** |
+
+An MSS is a close through the **MSS level**, against the trend. A close through the **MSB level** continues the trend.
+
+### What happens to the levels after a break
+
+**Bullish break** (MSB up or MSS up) at close `i`:
+1. **New structural low:** the lowest swing low since the broken high was set. This is the HL (or LL) the move started from, and it is the MSS level of the uptrend from now on. If a lower low formed in the same pullback, it replaces the earlier low.
+2. **Structural high:** none for now. The trend waits for the leg's next swing high.
+3. The next swing high becomes the new structural high: the HH and the next MSB level.
+4. The first swing low after that HH immediately becomes the new structural low: the HL and the new MSS level. The range to break is then **[HL, HH]**.
+5. Swings inside the range that break neither level are internal.
+
+**Bearish break** (MSB down or MSS down) is mirrored:
+1. **New structural high:** the highest swing high since the broken low was set. This is the LH the move started from and the MSS level of the downtrend.
+2. **Structural low:** none until the leg's next swing low, which becomes the LL (MSB level).
+3. The first swing high after that LL immediately becomes the LH (new MSS level). The range is **[LL, LH]**.
+
+## 4. Uptrend and downtrend
+
+- **Uptrend** (bias green): from the close of a bullish break (MSB up or MSS up) until the next close **below the structural low** (MSS down).
+- **Downtrend** (bias red): from the close of a bearish break until the next close **above the structural high** (MSS up).
+- **No trend** (0): only at the very start of the data, before the first break.
+
+So the trend only changes on a close through the MSS level, never on a swing label alone.
+
+The trend shown is always the state **at the close** of each candle; a break counts from the candle that made it.
+
+## 5. Swing labels HH / HL / LH / LL
+
+Each leg swing is labelled by comparing its price (the **wick**: high or low) with the **last structural swing of the same type**:
+- **HH** if a high is above the last structural high, otherwise **LH**.
+- **LL** if a low is below the last structural low, otherwise **HL**.
+
+Internal swings are drawn faded.
+
+> **Known inconsistency (open, 2026-11-20):** labels compare wicks, breaks need closes. A high that only wicks above the LH, without any close above it, is labelled **HH**. The trend stays bearish, correctly by §3. Example: 9 Aug 2026, the high of 65,472 wicked 59 points above the LH of 65,413, but no candle closed above it until 19 Aug. Proposed fix: in a downtrend, label a high that is not closed above as LH (a liquidity sweep); mirrored for lows in an uptrend.
+
+## 6. Hindsight vs live
+
+- **Hindsight structure** (chart labels, levels and the bias bar). The leg swings are built from all swings in the data, and each swing is used from its **pivot candle** on. A candle's colour can change later, when new swings are confirmed or legs are merged. This shows the cleanest trend but cannot be traded as shown.
+- **Live structure** (`live_structure`; used by the supply zones, the Pine indicator and the backtests). At every candle where a swing is confirmed, the leg swings are rebuilt from the last 120 swings confirmed **by then**, and §2–§4 run on until the next confirmation. Swings that a more extreme swing of the same type replaced are dropped, as in 1b. No future data is used. The live trend changes about 3× as often (39 vs 13 changes in 120 days).
+- **Live bias with confirmation** (`bias_bar`; the Pine indicator's bias strip):
+  - After an MSS the bias is **grey** (±0.5) until the new trend makes its first MSB; that MSB confirms the new trend.
+  - If price instead breaks back in the old direction first, the MSS **failed** and the bias returns to the old trend's colour from that close.
+
+## 7. Supply zones (chart)
+
+- **The zone:** each 8-candle swing high, as confirmed live, spanning the full high-to-low range of the candle that made the high. A candle taller than 1 % (`WIDE_ZONE`) gives only its upper wick: from the high down to the body high (the higher of open and close), at least 0.5 % tall (`MIN_ZONE`). The sharp-drop test below still uses the candle low.
+- **Very sharp move down:** only zones price left very sharply: within 4 candles after the zone candle, a low at least 2 × ATR(14) (Wilder, as of the swing-high candle) below the zone bottom (`SHARP_K`, `SHARP_ATR`; until 23 Nov 2026 this was 1 × ATR within 6 candles). A red zone only counts as known from the later of the swing-high confirmation and the candle that completes the drop, so it adds no hindsight. Zones without it are not drawn for now (`DRAW_GREY`).
+- **When it is drawn:** the box starts at that candle. It is only drawn if the zone became known while the live bias was bearish (red, not grey), and before price traded back into it.
+- **Zones at a LH:** a swing high that is the top of a pullback of at least `MIN_LEG` % up from the leg low, and below the previous leg high (leg swings as known at its confirmation). Touches before the confirmation do not count. Since 23 Nov 2026 they also need the bearish live bias like the other zones (`LH_BIAS = True`): without it (the earlier looser rule: drawn whatever the bias, not ended by a bias change) they gave the long losing runs in the backtest.
+- **When it ends:** at the first of these:
+  - the first candle that trades back into it after price left it;
+  - a higher high;
+  - the live bias stops being bearish;
+  - a newer leg high settles (zones only count for the current swing).
+
+## 7b. Demand zones (chart)
+
+The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
+
+- **Demand rules (since 23 Nov 2026, from the grid in `backtest_demand.py`):** only at a HL (`DEMAND_HL_ONLY`; the stricter "after a HH" filter `DEMAND_AFTER_HH` is off: higher win rate but half the trades); a rise of 1.5 ATR (`DEMAND_SHARP_ATR`) and at least 1 % (`DEMAND_MIN_PCT`) within 4 candles; a bearish MSS does not end the zone, only a confirmed downtrend (`DEMAND_COUNTER_MSS_ENDS = False`). 4 years: 38 longs, +27 % at 1 % risk, 5.6 % max drawdown. Supply zones keep their own rules.
+
+- **The zone:** each 8-candle swing low, as confirmed live, spanning the full range of the candle that made the low. A candle taller than 1 % gives only its lower wick: from the low up to the body low (the lower of open and close), at least 0.5 % tall.
+- **Very sharp move up:** within 4 candles a high at least 2 × ATR(14) above the candle high. Zones without it are not drawn.
+- **When it is drawn:** from the first close at which it is known (swing low confirmed, rise made) while the live bias is bullish (green, not a grey MSS), and before price traded back into it.
+- **Zones at a HL:** the bottom of a pullback of at least `MIN_LEG` % down from the leg high, above the previous leg low. Touches before the confirmation do not count; they need the bullish bias like the others (`LH_BIAS`).
+- **When it ends:** at the first of: a candle that trades back into it after price left it (a low above it first); a lower low; the live bias stops being bullish; a newer leg low settles.
+
+**Bias for the zones (since 23 Nov 2026, per side):** supply zones are shown in a bearish trend or a pending bearish MSS (bias bar red or faded red, `SUPPLY_MSS_OK = True`); demand zones in a bullish trend or a pending bullish MSS (green or faded green, `DEMAND_MSS_OK = True`). A zone ends when the bias leaves that set (`COUNTER_MSS_ENDS = True`). The chart's bias bar shows this live bias (it was the hindsight trend).
+
+## 8. Research notes
+
+- **Continuation:** a trend makes one more MSB about 50% of the time. SMA filters and other swing sizes don't change that (see `ms_research_summary.md`).
+- **Sideways** (`backtest_sideways.py`): "last 3 legs < X %" does pick out quieter periods (next-24h range 2.4–2.8 % vs 3.7–4.2 %). But following the live trend earns the same in and out of those periods (≈ +0.02 % per 24h, so practically no edge). Going flat while sideways therefore only adds trades and fees. Range vs ATR does not find quieter periods.

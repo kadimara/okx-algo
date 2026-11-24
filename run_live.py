@@ -21,14 +21,15 @@ from okx_trader import OKXTrader
 from strategies import MACrossover
 
 
-def setup_logging():
+def setup_logging(name: str = "trader", tag: str = ""):
+    """Log to the terminal and logs/<name>_<date>.log; tag (e.g. the coin) goes in every line."""
     Path("logs").mkdir(exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s  %(levelname)-7s  %(message)s",
+        format="%(asctime)s  %(levelname)-7s  " + (f"[{tag}] " if tag else "") + "%(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout),
-                  logging.FileHandler(Path("logs") / f"trader_{date.today()}.log")],
+                  logging.FileHandler(Path("logs") / f"{name}_{date.today()}.log")],
     )
 
 

@@ -52,6 +52,7 @@ class Trade:
     planned_r: float = float("nan")   # potential reward:risk at the entry (if a target exists)
     stop_pct: float = float("nan")    # entry-to-stop distance in % of the entry
     leverage: float = float("nan")    # position value / equity at the entry
+    setup: str = ""                   # e.g. BOS / CHoCH (MS strategy)
 
 
 class FuturesBacktester:

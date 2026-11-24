@@ -168,17 +168,27 @@ python run_live_vwap.py --live                # real money, asks you to type YES
 ## MS structure strategy (OKX perpetual futures)
 
 The Python version of the "MS strategy" Pine script, with the same rules and the same defaults
-as your final TradingView settings. Longs and shorts on the `BTC/USDT:USDT` perpetual, 2h candles.
+as your current TradingView inputs. Longs and shorts on the `BTC/USDT:USDT` perpetual, 4h candles.
 
-- **Structure:** swings of 2 days, HH/HL/LH/LL labels, and break of structure (BOS): a candle that
-  closes through the last swing low/high flips the trend at once.
-- **Long** (bullish trend): buy limit 0.35% above the HL candle's body bottom (lower of open/close),
-  stop 0.15% below the HL low. **Short** is mirrored on the LH.
-- **Target:** the newest swing on the other side (body edge). Used for the R filter (skip trades
-  below 3R); the take-profit order itself is off by default.
-- **Exits:** a candle trailing stop: from the candle after the fill, the stop follows the lowest
-  low (long) / highest high (short) of the last 12 candles, -/+ the stop offset, only in your favour.
+- **Structure:** swings of 2 days, HH/HL/LH/LL labels, and breaks: a candle that closes through
+  the last swing low/high flips the trend at once. A break in the trend direction is a BOS, one that
+  turns the trend is a CHoCH. With internal structure on (default), the extreme candle since the
+  broken swing becomes the LH/HL right away.
+- **HTF trend:** the same rules with 7-day swings (no internal swings). The HTF filter is off by
+  default; `--htf-filter` (or `--long-htf-filter` / `--short-htf-filter`) trades only with it.
+- **Setups:** only the HL behind a break up (long) / the LH behind a break down (short) is traded.
+  Continuation = that break was a BOS, pullback end = it was a CHoCH; each can be switched off.
+- **Long** (bullish trend): buy limit 0.45% above the HL candle's body bottom (lower of open/close),
+  stop at the HL low. **Short** is mirrored on the LH, with the sell limit 0.2% below its body top.
+- **Target:** the newest swing on the other side (body edge); right after a break, the further
+  of the broken swing and the one before it. Used for the R filter (skip longs below 1.25R, shorts below 2R); the
+  take-profit order itself is off by default.
+- **Exits:** at 2R the stop moves to entry, and a candle trailing stop starts: it follows the lowest
+  low of the last 16 candles (long) / the highest high of the last 2 candles (short), -/+ the stop
+  offset, only in your favour.
 - One trade per HL/LH. Size: 1% of equity at the stop, capped at 2x leverage.
+- Every entry/exit setting is separate for longs and shorts: `--X` sets both sides,
+  `--long-X` / `--short-X` one side (e.g. `--short-min-rr 3`, `--long-no-choch`).
 
 ```
 structure.py                analyze_bos_structure(): swings, labels, BOS, body edges
@@ -186,6 +196,10 @@ strategies/ms_structure.py  the strategy: entry, stop, target and filters per ca
 ms_backtester.py            backtest engine (fills, one trade per pivot, trail, break-even, sizing)
 okx_ms_trader.py            live/demo engine on OKX perpetuals
 run_backtest_ms.py          app: backtest
+run_backtest_ms_multi.py    app: backtest several coins, train / test, portfolio
+run_backtest_ms_long.py     app: backtest the "MS strategy long" Pine script (longs only)
+run_backtest_ms_short.py    app: backtest the "MS strategy short" Pine script (shorts only)
+run_backtest_ms_sides.py    app: both of those side by side, plus the total per year
 run_live_ms.py              app: live bot (demo by default)
 ```
 
@@ -196,27 +210,68 @@ python run_backtest_ms.py
 python run_backtest_ms.py --signal-data perp --maker-fee 0.05 --taker-fee 0.05 --slippage 0   # compare with TradingView
 python run_backtest_ms.py --use-target --min-rr 0
 python run_backtest_ms.py --no-trail --use-target --be-after-r 2
+python run_backtest_ms.py --no-htf-filter --long-no-choch --short-min-rr 3
 ```
 
 | Option | Default | Pine input |
 |---|---|---|
 | `--swing-days` | 2 | Swing size (days) |
+| `--htf-days` | 7 | HTF swing size (days) |
+| `--swing-candles` / `--htf-candles` | (days) | Swing / HTF swing size (candles), long / short scripts: 24 / 84 |
+| `--no-internal` | internal on | Internal structure (swing at BOS) |
 | `--side` | both | Take longs / Take shorts |
-| `--entry-offset` | 0.35 | Entry offset (%) |
-| `--stop-offset` | 0.15 | Stop offset (%) |
-| `--min-rr` | 3 | Skip trades below (R, 0 = off) |
+| `--cont` | all | Setup: continuation (BOS): `none`, `first` (BOS 1), `first2` (BOS 1 and 2), `all` |
+| `--no-choch` | on | Setup: pullback / rally end (CHoCH) |
+| `--no-htf-filter` / `--htf-filter` | off | Only when the HTF is bullish / bearish |
+| `--entry-offset` | long 0.45, short 0.2 | Entry offset (%) |
+| `--stop-offset` | 0 | Stop offset (%) |
+| `--min-rr` | long 1.25, short 2 | Skip trades below (R, 0 = off) |
 | `--target-offset` | 0 | Target offset (%) |
 | `--risk` | 1 | Risk per trade (% of equity) |
 | `--max-leverage` | 2 | Max leverage (x) |
 | `--use-target` | off | Use target |
-| `--be-after-r` | 0 | Move stop to entry after (R, 0 = off) |
+| `--be-after-r` | 2 | Move stop to entry after (R, 0 = off) |
 | `--no-trail` | trail on | Candle trailing stop |
-| `--trail-after-r` | 0 | Start trailing after (R) |
-| `--trail-candles` | 12 | Trail behind the last N candles |
+| `--trail-after-r` | 2 | Start trailing after (R) |
+| `--trail-candles` | long 16, short 2 | Trail behind the last N candles |
+
+All options from `--cont` to `--trail-candles` also exist as `--long-...` / `--short-...`.
+
+The defaults are the Pine inputs; the timeframe is 4h and fees are 0.1% maker / taker. For a
+like-for-like TradingView comparison add `--signal-data perp --maker-fee 0.05 --taker-fee 0.05 --slippage 0`.
+The best settings from the earlier 2h sweep (2020-2026, train / test) are still available:
+`--timeframe 2h --entry-offset 0.35 --long-min-rr 1.5 --short-htf-filter --target-offset 0.1
+--be-after-r 0 --trail-after-r 1 --trail-candles 24`.
+
+### Long and short scripts
+
+`ms_strategy_long.md` and `ms_strategy_short.md` are the Pine scripts with one side each. Same
+rules, plus the BOS number: continuation breaks are counted since the trend turned (BOS 1, 2, ...)
+and `--cont` picks which ones are traded. Swing sizes are in candles (24 / 84 = 2 / 7 days on 2h).
+
+```bash
+python run_backtest_ms_long.py                     # longs only, results/ms_long_*.csv
+python run_backtest_ms_short.py --cont first2      # shorts only, results/ms_short_*.csv
+python run_backtest_ms_sides.py --timeframe 2h     # both on their own, plus the total per year
+```
+
+Run separately, a long and a short can be open at the same time (as with the two scripts on
+TradingView). The live bot still trades the combined strategy (one position per coin).
+
+### Several coins
+
+```bash
+python run_backtest_ms_multi.py                              # BTC,ETH,SOL,XRP,DOGE,BNB
+python run_backtest_ms_multi.py --coins BTC,ETH --split 2024-06-01
+```
+
+Per coin a train (before `--split`) and a test result; a coin passes if it makes money in both.
+The portfolio line adds up the passing coins as one bot per coin on the same account, with the
+most positions open at once. Saved in `results/ms_multi_trades.csv` and `ms_multi_summary.csv`.
 
 Results: the report in the terminal, plus `results/ms_trades.csv` (every trade with its result in R,
-planned R, stop % and leverage), `ms_equity.csv`, `ms_structure.csv` (trend and both plans per
-candle) and `ms_pivots.csv` (the swings, with `how` = swing or bos).
+planned R, stop %, leverage and setup BOS/CHoCH), `ms_equity.csv`, `ms_structure.csv` (trend, HTF
+trend, breaks and both plans per candle) and `ms_pivots.csv` (the swings, with `how` = swing or bos).
 
 Your TradingView backtest ran on the `INDEX:BTCUSD` chart. `--signal-data index` (the default) uses
 OKX's BTC index, which is close but not identical, so expect small differences in the swings. Fills
@@ -234,3 +289,6 @@ python run_live_ms.py --live                # real money, asks you to type YES
   is cancelled. **It only moves while the bot runs**; when it's off, the last stop stays in place.
 - Leverage is set per trade (at most `--max-leverage`). State, including which HL/LH was already
   traded, is saved in `state/BTC-PERP_ms_demo.json`.
+- **More coins:** start one bot per coin, each in its own terminal (`--base ETH`, ...). Each has its
+  own state file and log (`logs/ms_ETH_<date>.log`) and risks `--risk` % of the whole account.
+  `--max-open` (default 3) blocks new entries while that many positions are open on the account.
