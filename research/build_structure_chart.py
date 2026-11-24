@@ -78,7 +78,11 @@ LEG_N, MIN_LEG, LEG_RULE, RETRACE = 8, 2.5, "pct", 10.0
 # whose open AND close are beyond the body edge of the structural swing candle, causal in one pass (live = hindsight).
 # EARLY_SWING (body mode): at a break the extreme of the leg into it becomes the HL / LH: "break" = at the break candle,
 # "wait" = only once that extreme is LEG_N candles old (a pullback must show first).
-STRUCT_MODE, EARLY_SWING = "structural", "wait"
+# SETTLED_LEGS (live structure): a swing only counts for the structure (can become the structural high / low, i.e. a
+# MSS / MSB level) once the leg AFTER it is a real leg (>= MIN_LEG %, ended by a confirmed swing): the newest swing of a
+# rebuild never counts yet, the one before it only when the last leg is >= MIN_LEG. Unsettled swings can still be
+# merged away at the next rebuild (only the newest 1-2 swings ever change).
+STRUCT_MODE, EARLY_SWING, SETTLED_LEGS = "structural", "wait", False
 
 
 def base_swings(df, n):
@@ -315,8 +319,11 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
         # a swing replaced by a more extreme one of the same type (both known by now) is dropped, like base_swings
         known = [p for k, p in enumerate(known) if k == len(known) - 1 or known[k + 1][1] != p[1]]
         P = merge_legs(known[-window:], min_leg)
+        Ps = P                                      # SETTLED_LEGS: only swings with a real leg after them count
+        if SETTLED_LEGS and len(P) > 4:
+            Ps = P[:-1] if leg_big_enough(P[:-1], P[-1][2]) else P[:-2]
         i0 = t_idx[P[0][0]]
-        st = structure(close, P, i0, c2)
+        st = structure(close, Ps, i0, c2)
         trend[c:c2] = st["bias"][c - i0:]
         breaks += [b for b in st["breaks"] if b[0] >= c]
         highs = [p[0] for p in P[:-2] if p[1] == "h"]
@@ -327,14 +334,14 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
             # The first swings of the window are never merged (merge_legs keeps the first swing), so an old swing that
             # reaches the window edge would come back: only the swings from the third one on update the labels.
             edge = P[2][0] if len(P) > 2 and lab else P[0][0]
-            cur = {(q[0], q[1]) for q in P}
+            cur = {(q[0], q[1]) for q in Ps}
             gone |= {key for key in lab if key[0] >= edge and key not in cur}
-            for row in label_swings(P, st["keep"]):
+            for row in label_swings(Ps, st["keep"]):
                 if row[0] >= edge:
                     lab[(row[0], row[1])] = row
                     gone.discard((row[0], row[1]))
             if c2 == len(df):
-                levels = structure_levels(df, P, st, c2)
+                levels = structure_levels(df, Ps, st, c2)
     for b in breaks:
         b[3] = trend[b[0] - 1]
     out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)

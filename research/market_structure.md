@@ -109,6 +109,23 @@ Internal swings are drawn faded.
   - After an MSS the bias is **grey** (±0.5) until the new trend makes its first MSB; that MSB confirms the new trend.
   - If price instead breaks back in the old direction first, the MSS **failed** and the bias returns to the old trend's colour from that close.
 
+### Settled legs (option, `SETTLED_LEGS = True`, tested 2026-11-24)
+At each rebuild only the newest 1–2 swings can still change (measured over 1,400 rebuilds: 54 % nothing changes,
+15 % the newest swing, 31 % the newest two, never older). A swing that can still be merged away can briefly become
+the MSS level (e.g. the LH 64,246 on 4 Aug 2026: its leg in was 3.2 %, the pullback after it only 1.2 %).
+The option: a swing only counts for the structure once the leg after it is a real leg (>= 2.5 %, ended by a confirmed swing).
+The newest swing never counts yet.
+
+| 4 years | current | settled legs |
+|---|---|---|
+| trend changes | 411 | 191 |
+| median trend length | 46 h | 140 h |
+| MSS / month | 6.0 | 3.5 |
+| shorts, confirmed bearish trend | +21.6 % (DD 6.8 %) | −7.6 % (DD 18.1 %) |
+| demand chart rule at a HL | +27.1 % (DD 5.6 %) | +24.7 % (DD 5.6 %) |
+
+The structure is much calmer, but the bias reacts later, and the shorts lose their edge. The default stays `False`.
+
 ## 6b. Body-break structure (option, `STRUCT_MODE = "body"`)
 
 An alternative structure, built causally in one pass (`body_structure`), so live = hindsight:
