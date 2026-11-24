@@ -70,7 +70,10 @@ for hrs in LOWER_HOURS:
 # until every leg is at least MIN_LEG %. The last leg is still forming and is never removed.
 # LEG_RULE "pct": a leg must be at least MIN_LEG % of the swing price. "retrace": a leg must retrace at least RETRACE %
 # of the leg before it (after a LH -> LL drop the next high only counts when the bounce is >= RETRACE % of that drop).
-LEG_N, MIN_LEG, LEG_RULE, RETRACE = 8, 2.5, "pct", 10.0
+# MERGE_EXTREME: when the smallest leg a -> b (between l and r: l, a, b, r) is merged, keep the most extreme swings
+# instead of always dropping a and b: if a is more extreme than r, drop b and r (keep l, a); else if b is more extreme
+# than l, drop l and a (keep b, r); else drop a and b as before. False = always drop a and b.
+LEG_N, MIN_LEG, LEG_RULE, RETRACE, MERGE_EXTREME = 8, 2.5, "pct", 10.0, False
 # STRUCT_MODE: "structural" = breaks of the structural high / low (the levels that turn or continue the trend, see
 # structure); "swing" = breaks of the most recent swing high / low (a close above the last swing high is bullish, below
 # the last swing low bearish). Both on the same leg swings; MSS / MSB and the bias bar work the same.
@@ -98,6 +101,11 @@ def swing_events(df, n):
         return [list(e) for e in body_structure(df, n)["events"]]
     ev = analyze_bos_structure(df, n).attrs.get("events", [])
     return [[T[pi], ty[0], float(price), T[ci]] for pi, ci, ty, _, price, _ in ev]
+
+
+def more_b(Q, x, y):
+    """Is swing x more extreme than swing y (same type): higher for highs, lower for lows."""
+    return Q[x][2] > Q[y][2] if Q[x][1] == "h" else Q[x][2] < Q[y][2]
 
 
 def merge_legs(P, min_leg):
@@ -137,10 +145,21 @@ def merge_legs(P, min_leg):
                 heapq.heappush(heap, (cur, a, b))
             continue
         l, r = prv[a], nxt[b]
-        alive[a] = alive[b] = False
-        nxt[l], prv[r] = r, l
-        for x, y in ((l, r), (r, nxt[r])):         # the new leg l -> r; with the retrace rule also r -> next (bigger leg before)
-            if prv[x] >= 0 and y < n - 1 and alive[x]:
+        more = (lambda x, y: Q[x][2] > Q[y][2]) if Q[a][1] == "h" else (lambda x, y: Q[x][2] < Q[y][2])
+        drop = (a, b)
+        if MERGE_EXTREME:
+            if r < n and more(a, r):
+                drop = (b, r)                       # a stays the leg extreme (a lower high r does not replace it)
+            elif prv[l] >= 0 and more_b(Q, b, l):
+                drop = (l, a)                       # b is the lower low / higher high: it stays
+        x0, x1 = drop
+        L_, R_ = prv[x0], nxt[x1]
+        alive[x0] = alive[x1] = False
+        nxt[L_] = R_
+        if R_ < n:
+            prv[R_] = L_
+        for x, y in ((L_, R_), (R_, nxt[R_] if R_ < n else n)):   # the new leg; with the retrace rule also the next one
+            if 0 <= x < n and prv[x] >= 0 and y < n - 1 and alive[x]:
                 v = size(x, y)
                 if v < lim:
                     heapq.heappush(heap, (v, x, y))

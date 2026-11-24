@@ -41,6 +41,14 @@ The base swings from 1a–1c are reduced to **leg swings**:
 
 The first and last swing always stay; the last leg is still forming.
 
+**Option `MERGE_EXTREME` (tested 2026-11-24, off).** Step 2 removes both swings of the smallest leg, so for one
+rebuild a lower high can stand in for a higher one (25–26 Sep 2026: 84,341 replaced 85,256). With `MERGE_EXTREME` the
+most extreme swings stay: for l, a, b, r with a -> b the smallest leg, drop b and r when a is more extreme than r,
+else drop l and a when b is more extreme than l, else a and b as before. Over 4 years the trend, breaks and MSSes stay
+the same (411 trend changes, 6.0 MSS / month); fewer temporary swings (live labels 60 -> 50 / month). Backtests
+(with ZONE_REAL_LEG): shorts confirmed trend +18.0 % -> +18.7 %, shorts chart rules +12.3 % -> +14.1 %, but demand
+at a HL +31.8 % -> +25.1 % and all demand zones +36.4 % -> +30.8 %. Mixed, so it stays off.
+
 ## 2. Structural swings, ranges and levels
 
 At any time the structure has **one structural high** and **one structural low**. Together they form the current range. All other swings inside that range are **internal**: they break nothing and are drawn faded.
