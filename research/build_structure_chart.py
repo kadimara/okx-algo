@@ -308,7 +308,7 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
     events = sorted(set(conf_i))
     trend, start, breaks = [0] * len(df), [None] * len(df), []
     start_low = [None] * len(df)
-    lab, levels = {}, None
+    lab, levels, gone = {}, None, set()     # gone: swings a later rebuild merged away (inside its window, not in its legs)
     for e, c in enumerate(events):
         c2 = events[e + 1] if e + 1 < len(events) else len(df)
         known = ev[:bisect.bisect_right(conf_i, c)][-2 * window:]
@@ -324,14 +324,23 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
         lows = [p[0] for p in P[:-2] if p[1] == "l"]
         start_low[c:c2] = [lows[-1] if lows else None] * (c2 - c)
         if labels:
+            cur = {(q[0], q[1]) for q in P}
+            gone |= {key for key in lab if key[0] >= P[0][0] and key not in cur}
             for row in label_swings(P, st["keep"]):
                 lab[(row[0], row[1])] = row
+                gone.discard((row[0], row[1]))
             if c2 == len(df):
                 levels = structure_levels(df, P, st, c2)
     for b in breaks:
         b[3] = trend[b[0] - 1]
     out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
-    return out + ({"legs": relabel(sorted(lab.values())), "levels": levels},) if labels else out
+    if not labels:
+        return out
+    # Swings merged away later are no real legs: no label, drawn as a small grey dot (7th field 1), and left out of
+    # the label comparison (each label compares with the previous real swing of the same type).
+    real = relabel([r for key, r in sorted(lab.items()) if key not in gone])
+    merged = [[r[0], r[1], "", r[3], r[4], True, 1] for key, r in sorted(lab.items()) if key in gone]
+    return out + ({"legs": sorted(real + merged, key=lambda r: (r[0], r[1])), "levels": levels},)
 
 
 _MEMO = {}   # results of body_structure and of is_lower_high / is_higher_low per swing (the backtests ask the same swings for many variants)
