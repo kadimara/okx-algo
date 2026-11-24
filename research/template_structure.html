@@ -59,6 +59,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   <header>
     <h1>BTC Market Structure</h1>
     <span class="sub">OKX BTC-USD index · <span id="tf"></span> candles · market structure, leg swings</span>
+    <span class="sub" id="live" title="Price candles after the build are fetched from OKX every minute; swings, zones and the bias stay as built">Live: connecting…</span>
   </header>
 
   <div class="bar">
@@ -348,6 +349,31 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       if (atEdge()) { markers(); if (levels.req) levels.req(); if (supply.req) supply.req(); }
     });
   });
+  // Live feed: every minute the newest 1h index candles from OKX (public API) update the price series after the build.
+  // Only the candles move: swings, zones, levels and the bias stay as they were when the page was built.
+  (function live() {
+    const el = $("live"), URL = "https://www.okx.com/api/v5/market/index-candles?instId=BTC-USDT&bar=1H&limit=24";
+    let fails = 0;
+    async function tick() {
+      try {
+        const res = await fetch(URL, { cache: "no-store" });
+        const js = await res.json();
+        if (js.code !== "0" || !Array.isArray(js.data)) throw new Error("bad answer");
+        const rows = js.data.map(r => ({ time: Math.floor(+r[0] / 1000), open: +r[1], high: +r[2], low: +r[3], close: +r[4] }))
+          .filter(r => r.time > lastT && [r.open, r.high, r.low, r.close].every(Number.isFinite)).sort((a, b) => a.time - b.time);
+        rows.forEach(r => candles.update(r));
+        const last = rows[rows.length - 1];
+        fails = 0;
+        el.textContent = last ? `Live: ${fmt(last.close)} · ${new Date().toISOString().slice(11, 16)} UTC · ${rows.length} new candle${rows.length === 1 ? "" : "s"} since the build`
+                              : `Live: no new candle yet · ${new Date().toISOString().slice(11, 16)} UTC`;
+      } catch (e) {
+        fails += 1;
+        el.textContent = fails >= 3 ? "Live feed unavailable here (the OKX request is blocked); showing the built data" : "Live: retrying…";
+      }
+    }
+    tick();
+    setInterval(tick, 60000);
+  })();
   window.__chart = chart;   // test hook (Playwright) 
 
 
