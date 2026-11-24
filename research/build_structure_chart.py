@@ -202,8 +202,9 @@ def structure(close, P, i0, i1, track=None):
     breaks = []                   # every close through a structural level: [candle index, direction, level, trend before]
     bias = [0] * (i1 - i0)        # trend at each candle's close
     since_hi = since_lo = None    # lowest swing low since hi was set / highest swing high since lo was set
+    bp = globals().get("BREAK_POW")   # optional (ok_up, ok_dn) per candle: a MSS needs a powerful candle (reversal chart)
     for i in range(i0, i1):
-        if hi is not None and close[i] > P[hi][2]:          # bullish break
+        if hi is not None and close[i] > P[hi][2] and (bp is None or trend > 0 or bp[0][i]):   # bullish break
             breaks.append([i, 1, P[hi][2], trend])
             # the HL / LL the break started from: the lowest swing low since the broken high
             cand = [x for x in (since_hi, lo if lo is not None and lo > hi else None) if x is not None]
@@ -214,7 +215,7 @@ def structure(close, P, i0, i1, track=None):
                 lo = new
                 keep.add(lo)
             trend, hi, need, since_lo, brk = 1, None, None, None, i
-        elif lo is not None and close[i] < P[lo][2]:        # bearish break
+        elif lo is not None and close[i] < P[lo][2] and (bp is None or trend < 0 or bp[1][i]):  # bearish break
             breaks.append([i, -1, P[lo][2], trend])
             cand = [x for x in (since_lo, hi if hi is not None and hi > lo else None) if x is not None]
             if cand:

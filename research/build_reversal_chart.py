@@ -2,8 +2,8 @@
 
 - Swings: 4-candle pivots (highest / lowest of 4 candles on each side), legs under REV_MIN_LEG % merged (the leg
   structure of build_structure_chart.py with LEG_N = 4); labels HH / HL / LH / LL with hindsight (final legs).
-- Reversals: every MSS of the live 4-candle structure (a close through the structural level against the trend, no
-  hindsight). Area: from the extreme of the move before it (the lowest low / highest high since the previous opposite
+- Reversals: every MSS of the live 4-candle structure (a close through the structural level against the trend on a
+  powerful candle: body >= REV_POWER x ATR; no hindsight). Area: from the extreme of the move before it (the lowest low / highest high since the previous opposite
   MSS) to the MSS candle, between that extreme and the broken level.
 - After each reversal: the move in its direction until the next opposite MSS (max high / min low vs the MSS close).
 Writes research/reversal_chart.html from research/template_reversal.html.
@@ -25,6 +25,9 @@ import pandas as pd
 from structure import analyze_bos_structure, bos_pivot_list
 
 REV_N, REV_MIN_LEG, DAYS = 4, 1.5, 730
+# REV_POWER: a MSS (break against the trend) only counts on a powerful candle: its body in the break direction is at
+# least REV_POWER x ATR(14) (Wilder, as of the candle before). 0 = any close beyond the level. MSBs are unchanged.
+REV_POWER = 1.5
 
 src = (HERE / "build_structure_chart.py").read_text(encoding="utf-8")
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "np": np,
@@ -41,6 +44,11 @@ ns["ts"] = ts = lambda t: int(pd.Timestamp(t).timestamp())
 ns["T"] = T = [ts(t) for t in df.index]
 ns["t_idx"] = {t: i for i, t in enumerate(T)}
 H, L, C = (df[k].to_numpy(float) for k in ("high", "low", "close"))
+O = df["open"].to_numpy(float)
+if REV_POWER:
+    atr = ns["wilder_atr"](df)
+    a_prev = np.r_[atr[0], atr[:-1]]
+    ns["BREAK_POW"] = ((C - O) >= REV_POWER * a_prev, (O - C) >= REV_POWER * a_prev)
 
 trend, breaks, _ = ns["live_structure"](df, REV_N, REV_MIN_LEG)
 bias = ns["bias_bar"](trend, breaks)
@@ -59,7 +67,7 @@ for q, (i, d, level, _) in enumerate(mss):
     prev = i
 
 data = {"candles": [[T[k], *(round(float(v), 1) for v in r)] for k, r in enumerate(df[["open", "high", "low", "close"]].to_numpy())],
-        "legs": legs, "bias": [float(b) for b in bias], "rev": rev, "n": REV_N, "minLeg": REV_MIN_LEG}
+        "legs": legs, "bias": [float(b) for b in bias], "rev": rev, "n": REV_N, "minLeg": REV_MIN_LEG, "power": REV_POWER}
 page = (HERE / "template_reversal.html").read_text(encoding="utf-8").replace("__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "reversal_chart.html").write_text(page, encoding="utf-8")
 up = [r for r in rev if r[4] > 0]; dn = [r for r in rev if r[4] < 0]

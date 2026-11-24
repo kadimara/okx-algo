@@ -81,7 +81,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     <div class="strip-key">Bias strip: trend of the live 4-candle structure (green up, red down; faded = a MSS its first MSB has not confirmed yet).</div>
   </div>
   <div class="legend">
-    <div><code>Reversal area</code> every MSS of the live <span id="sw2"></span>-candle structure (a close through the structural level against the trend, no hindsight): from the extreme of the move before it (lowest low / highest high since the previous opposite MSS) to the MSS candle, between that extreme and the broken level (solid line). Label: <code>+x%</code> the move in its direction until the next opposite MSS; <code>(y%)</code> how far the MSS close was from the extreme.</div>
+    <div><code>Reversal area</code> every MSS of the live <span id="sw2"></span>-candle structure (a close through the structural level against the trend by a powerful candle: its body is at least <span id="pw"></span> &times; ATR(14); a weaker close does not break the level; no hindsight): from the extreme of the move before it (lowest low / highest high since the previous opposite MSS) to the MSS candle, between that extreme and the broken level (solid line). Label: <code>+x%</code> the move in its direction until the next opposite MSS; <code>(y%)</code> how far the MSS close was from the extreme.</div>
     <div><code>HH LH HL LL</code> the <span id="sw3"></span>-candle leg swings (legs under <span id="ml"></span>% merged), labelled against the previous swing of the same type, with hindsight (final legs).</div>
   </div>
 </div>
@@ -92,7 +92,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   const D = JSON.parse(document.getElementById("data").textContent);
   const $ = id => document.getElementById(id);
   const C = D.candles, T = C.map(c => c[0]), lastT = T[T.length - 1], tIdx = new Map(T.map((t, i) => [t, i]));
-  ["sw", "sw2", "sw3"].forEach(k => $(k).textContent = D.n); $("ml").textContent = D.minLeg;
+  ["sw", "sw2", "sw3"].forEach(k => $(k).textContent = D.n); $("ml").textContent = D.minLeg; $("pw").textContent = D.power;
   const css = () => { const s = getComputedStyle(document.documentElement), g = k => s.getPropertyValue(k).trim();
     return { fg: g("--fg"), bg: g("--panel"), muted: g("--muted"), line: g("--line"), up: g("--up"), down: g("--down"),
       upSoft: g("--up-soft"), downSoft: g("--down-soft"), mono: g("--mono") }; };
