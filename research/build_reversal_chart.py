@@ -71,8 +71,13 @@ for q, (i, d, level, _) in enumerate(mss):
 # from the MSS candle; ends at the first candle that trades back into it (the fill), that trades through it, or at the
 # next opposite MSS. Trade (the main chart's entry plan): entry at the zone edge, stop beyond the zone (at least 0.5 %),
 # target the extreme of the move between the zone candle and the fill (at least 2R, else no trade); a candle hitting
-# both stop and target is a loss; R after 0.05 % fee per side.
+# both stop and target is a loss; R after 0.05 % fee per side. With TRAIL (default) a trailing stop replaces the target.
 WIDE_ZONE_, MIN_ZONE_, MIN_STOP_, MIN_RR_, FEE_ = 1.0, 0.5, 0.5, 2.0, 0.05
+# TRAIL: no fixed target; the stop trails behind the structure (REV_N-candle swing lows for longs, highs for shorts)
+TRAIL = True
+_lmin, _hmax = df["low"].rolling(REV_N).min(), df["high"].rolling(REV_N).max()
+piv_lo = ((df["low"] < _lmin.shift(1)) & (df["low"] <= _lmin.shift(-REV_N))).to_numpy()
+piv_hi = ((df["high"] > _hmax.shift(1)) & (df["high"] >= _hmax.shift(-REV_N))).to_numpy()
 zones = []
 for q, (i, d, level, _) in enumerate(mss):
     t0 = rev[q][0]; e = ns["t_idx"][t0]
@@ -90,14 +95,28 @@ for q, (i, d, level, _) in enumerate(mss):
     trade = None
     if f is not None:
         x = top; risk = max(x - bot, MIN_STOP_ / 100 * abs(x))
-        tgt = Hs[e + 1:f].max()
-        rr = (tgt - x) / risk
-        if rr >= MIN_RR_:
+        fee = 2 * FEE_ / (risk / abs(x) * 100)
+        if TRAIL:
+            # trailing stop: from the zone stop, moved to every higher confirmed REV_N-candle swing low after the entry
+            # (mirrored for supply); exit when the stop is hit (checked before the stop moves at that close)
+            piv = piv_lo if d > 0 else piv_hi
+            stop = x - risk
             for k in range(f, len(df)):
-                if Ls[k] <= x - risk:
-                    trade = ["loss", T[f], T[k], round(-1 - 2 * FEE_ / (risk / abs(x) * 100), 2)]; break
-                if k > f and Hs[k] >= tgt:
-                    trade = ["win", T[f], T[k], round(rr - 2 * FEE_ / (risk / abs(x) * 100), 2)]; break
+                if Ls[k] <= stop:
+                    rr = (stop - x) / risk
+                    trade = ["win" if rr - fee > 0 else "loss", T[f], T[k], round(rr - fee, 2)]; break
+                p = k - REV_N
+                if p > f and piv[p] and Ls[p] > stop:
+                    stop = Ls[p]
+        else:
+            tgt = Hs[e + 1:f].max()
+            rr = (tgt - x) / risk
+            if rr >= MIN_RR_:
+                for k in range(f, len(df)):
+                    if Ls[k] <= x - risk:
+                        trade = ["loss", T[f], T[k], round(-1 - fee, 2)]; break
+                    if k > f and Hs[k] >= tgt:
+                        trade = ["win", T[f], T[k], round(rr - fee, 2)]; break
     zt, zb = (top, bot) if d > 0 else (-bot, -top)
     zones.append([t0, T[i], None if end is None else T[end], round(float(zt), 1), round(float(zb), 1), d, trade])
 
