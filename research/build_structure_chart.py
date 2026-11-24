@@ -910,8 +910,7 @@ def zone_trades(df, zones, side, bias, start, lim, keep_mss=False):
 
 
 # Weekly zones (visual only): each weekly swing high / low (the highest high / lowest low of WEEK_N 1h candles on each
-# side, i.e. +-7 days) gets the wick of its DAILY candle (UTC day) as the zone: supply from the day's high down to its
-# body high (max of the day's open and close), demand from the day's low up to its body low; at least MIN_ZONE % tall.
+# side, i.e. +-7 days) gets its whole DAILY candle (UTC day, high to low) as the zone.
 # Known WEEK_N candles after the swing; from then on it ends at the first candle that trades back into it after price
 # left it, or that trades through it. [t swing candle, t known, t end (None = active), top, bottom]
 WEEK_N = 168
@@ -927,12 +926,10 @@ def weekly_zones(df, kind):
             continue
         if kind == "supply" and H[p] == H[p - n:p + n + 1].max():
             dd = day.loc[dkey[p]]
-            top = dd.high
-            bot = min(max(dd.open, dd.close), top / (1 + MIN_ZONE / 100))
+            top, bot = dd.high, dd.low
         elif kind == "demand" and L[p] == L[p - n:p + n + 1].min():
             dd = day.loc[dkey[p]]
-            bot = dd.low
-            top = max(min(dd.open, dd.close), bot * (1 + MIN_ZONE / 100))
+            top, bot = dd.high, dd.low
         else:
             continue
         last, c, left, end = p, p + n, False, None
