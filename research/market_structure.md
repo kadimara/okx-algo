@@ -134,6 +134,20 @@ Test (2026-11-24, 4 years of data, 1 % risk per trade):
 
 The zone rules were tuned on the current structure. The default stays `"structural"`.
 
+**12-candle swings** (`LEG_N = 12`; the wait mode then also waits 12 candles), same test:
+
+| | 12c current | 12c body, break | 12c body, wait |
+|---|---|---|---|
+| swings / month | 41 | 40 | 39 |
+| MSS / month | 4.7 | 9.1 | 8.8 |
+| MSS reversed within 24h | 3 % | 22 % | 20 % |
+| shorts, confirmed bearish trend | +9.7 % (DD 13.5 %) | +2.1 % (DD 17.8 %) | +2.1 % (DD 18.8 %) |
+| longs at a HL (zone-rules script) | +12.3 % (12 trades) | +18.7 % (12, DD 2.2 %) | +18.4 % (9, DD 2.2 %) |
+| demand chart rule, all zones | +8.6 % | +15.0 % | +18.4 % (DD 8.8 %) |
+| demand chart rule at a HL | +16.9 % | +16.4 % | +15.0 % |
+
+12 candles cut the false MSSes by about a third compared with 8 candles. Longs on the body structure stay good. Shorts are best on the current 8-candle structure (+21.6 %).
+
 ## 7. Supply zones (chart)
 
 - **The zone:** each 8-candle swing high, as confirmed live, spanning the full high-to-low range of the candle that made the high. A candle taller than 1 % (`WIDE_ZONE`) gives only its upper wick: from the high down to the body high (the higher of open and close), at least 0.5 % tall (`MIN_ZONE`). The sharp-drop test below still uses the candle low.
