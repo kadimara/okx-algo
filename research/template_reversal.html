@@ -71,8 +71,10 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     </div>
     <div class="toggles">
       <label><input type="checkbox" id="tLab" checked><span class="sw" style="background:var(--fg)"></span>Swing labels</label>
-      <label><input type="checkbox" id="tUp" checked><span class="sw box"></span>Reversals up</label>
-      <label><input type="checkbox" id="tDn" checked><span class="sw box" style="background:var(--down)"></span>Reversals down</label>
+      <label><input type="checkbox" id="tUp" checked><span class="sw" style="background:var(--up)"></span>Reversals up</label>
+      <label><input type="checkbox" id="tDn" checked><span class="sw" style="background:var(--down)"></span>Reversals down</label>
+      <label><input type="checkbox" id="tDz" checked><span class="sw box"></span>Demand zones</label>
+      <label><input type="checkbox" id="tSz" checked><span class="sw box" style="background:var(--down)"></span>Supply zones</label>
     </div>
   </div>
   <div class="chart-box">
@@ -81,7 +83,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     <div class="strip-key">Bias strip: trend of the live 4-candle structure (green up, red down; faded = a MSS its first MSB has not confirmed yet).</div>
   </div>
   <div class="legend">
-    <div><code>Reversal area</code> every MSS of the live <span id="sw2"></span>-candle structure (a close through the structural level against the trend by a powerful candle: its body is at least <span id="pw"></span> &times; ATR(14); a weaker close does not break the level; no hindsight): from the extreme of the move before it (lowest low / highest high since the previous opposite MSS) to the MSS candle, between that extreme and the broken level (solid line). Label: <code>+x%</code> the move in its direction until the next opposite MSS; <code>(y%)</code> how far the MSS close was from the extreme.</div>
+    <div><code>Reversal area</code> every MSS of the live <span id="sw2"></span>-candle structure (a close through the structural level against the trend by a powerful candle: its body is at least <span id="pw"></span> &times; ATR(14); a weaker close does not break the level; no hindsight): the solid line is the broken level, from the extreme of the move before it (lowest low / highest high since the previous opposite MSS) to the MSS candle. Label: <code>+x%</code> the move in its direction until the next opposite MSS; <code>(y%)</code> how far the MSS close was from the extreme.</div>
+    <div><code>Demand / supply zone</code> at each reversal: the candle of its bottom (reversal up, demand) or top (reversal down, supply); the whole candle, or its wick if the candle is taller than 1% (at least 0.5%). Shown from the MSS; ends when price comes back into it (the entry), trades through it, or at the next opposite reversal. Trade: entry at the zone edge, stop beyond the zone (at least 0.5%), target the high / low of the move before the entry (at least 2R): <code>&check; +xR</code> target hit, <code>&cross; &minus;1R</code> stopped (after fees).</div>
     <div><code>HH LH HL LL</code> the <span id="sw3"></span>-candle leg swings (legs under <span id="ml"></span>% merged), labelled against the previous swing of the same type, with hindsight (final legs).</div>
   </div>
 </div>
@@ -105,7 +108,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   candles.setData(C.map(c => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4] })));
   const strip = chart.addHistogramSeries({ priceScaleId: "b", lastValueVisible: false, priceLineVisible: false, base: 0 });
   chart.priceScale("b").applyOptions({ scaleMargins: { top: 0.97, bottom: 0 } });
-  const show = { lab: true, up: true, dn: true };
+  const show = { lab: true, up: true, dn: true, dz: true, sz: true };
   // Reversal areas: [tExtreme, tMSS, extreme, level, dir, follow %, mss distance %]
   const areas = {
     chart: null, series: null, req: null, k: null,
@@ -125,9 +128,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
           if (x2 < 0 || x1 > bitmapSize.width) continue;
           const ya = s.priceToCoordinate(ext), yb = s.priceToCoordinate(lvl); if (ya == null || yb == null) continue;
           const col = d > 0 ? k.up : k.down;
-          ctx.fillStyle = col; ctx.globalAlpha = 0.16;
-          ctx.fillRect(x1, Math.min(ya, yb) * vr, x2 - x1, Math.abs(yb - ya) * vr);
-          ctx.globalAlpha = 0.9; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, Math.round(1.5 * hr));
+          ctx.fillStyle = col; ctx.globalAlpha = 0.9; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, Math.round(1.5 * hr));
           ctx.beginPath(); ctx.moveTo(x1, Math.round(yb * vr) + 0.5); ctx.lineTo(x2 + 6 * hr, Math.round(yb * vr) + 0.5); ctx.stroke();
           ctx.globalAlpha = 1; ctx.textBaseline = d > 0 ? "bottom" : "top";
           ctx.fillText(`${d > 0 ? "↑" : "↓"} +${fol}% (${dist}%)`, x2 + 4 * hr, yb * vr + (d > 0 ? -3 : 3) * vr);
@@ -136,9 +137,43 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       });
     }
   };
+  // Zones at the reversals: [t zone candle, t MSS (shown from), t end, top, bottom, dir, trade [res, fillT, exitT, R] | null]
+  const zonesP = {
+    chart: null, series: null, req: null,
+    attached(p) { this.chart = p.chart; this.series = p.series; this.req = p.requestUpdate; },
+    detached() {}, updateAllViews() {},
+    paneViews() { return [{ zOrder: () => "bottom", renderer: () => ({ draw() {}, drawBackground: t => zonesP.paint(t) }) }]; },
+    paint(target) {
+      if (!this.chart || !areas.k) return;
+      const ts = this.chart.timeScale(), s = this.series, bar = ts.options().barSpacing || 6, k = areas.k;
+      target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
+        ctx.lineWidth = Math.max(1, Math.round(hr)); ctx.font = `600 ${Math.round(10 * vr)}px ${k.mono}`;
+        ctx.textBaseline = "middle"; ctx.textAlign = "left";
+        for (const [t0, , t1, top, bot, d, tr] of D.zones) {
+          if ((d > 0 && !show.dz) || (d < 0 && !show.sz)) continue;
+          const xa = ts.logicalToCoordinate(tIdx.get(t0)); if (xa == null) continue;
+          const xb = t1 == null ? null : ts.logicalToCoordinate(tIdx.get(t1));
+          const x1 = (xa - bar / 2) * hr, x2 = xb == null ? bitmapSize.width : xb * hr;
+          if (x2 < 0 || x1 > bitmapSize.width) continue;
+          const y1 = s.priceToCoordinate(top), y2 = s.priceToCoordinate(bot); if (y1 == null || y2 == null) continue;
+          const col = d > 0 ? k.up : k.down, h = Math.max(1, (y2 - y1) * vr);
+          ctx.fillStyle = ctx.strokeStyle = col;
+          ctx.globalAlpha = t1 == null ? 0.25 : 0.16; ctx.fillRect(x1, y1 * vr, x2 - x1, h);
+          ctx.globalAlpha = t1 == null ? 0.9 : 0.6; ctx.strokeRect(x1, y1 * vr, x2 - x1, h);
+          if (tr) {
+            const win = tr[0] === "win";
+            ctx.globalAlpha = 1; ctx.fillStyle = win ? k.up : k.down;
+            ctx.fillText(`${win ? "\u2713" : "\u2717"} ${tr[3] > 0 ? "+" : "\u2212"}${Math.abs(tr[3]).toFixed(1)}R`, Math.max(x1, 0) + 4 * hr, (y1 + y2) / 2 * vr);
+          }
+        }
+        ctx.globalAlpha = 1;
+      });
+    }
+  };
+  candles.attachPrimitive(zonesP);
   candles.attachPrimitive(areas);
   function draw() {
-    const k = css(); areas.k = k; if (areas.req) areas.req();
+    const k = css(); areas.k = k; if (areas.req) areas.req(); if (zonesP.req) zonesP.req();
     chart.applyOptions({ layout: { background: { type: "solid", color: k.bg }, textColor: k.muted, fontFamily: k.mono, fontSize: 11 },
       crosshair: { vertLine: { color: k.muted, labelBackgroundColor: k.muted }, horzLine: { color: k.muted, labelBackgroundColor: k.muted } } });
     candles.applyOptions({ upColor: k.up, downColor: k.down, wickUpColor: k.up, wickDownColor: k.down });
@@ -169,6 +204,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   $("tLab").addEventListener("change", e => { show.lab = e.target.checked; draw(); });
   $("tUp").addEventListener("change", e => { show.up = e.target.checked; if (areas.req) areas.req(); });
   $("tDn").addEventListener("change", e => { show.dn = e.target.checked; if (areas.req) areas.req(); });
+  $("tDz").addEventListener("change", e => { show.dz = e.target.checked; if (zonesP.req) zonesP.req(); });
+  $("tSz").addEventListener("change", e => { show.sz = e.target.checked; if (zonesP.req) zonesP.req(); });
   draw(); setPeriod(30);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
   window.__chart = chart;

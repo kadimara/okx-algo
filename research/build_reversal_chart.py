@@ -66,10 +66,50 @@ for q, (i, d, level, _) in enumerate(mss):
                 round(float(abs(C[i] / (L[e] if d > 0 else H[e]) - 1) * 100), 1)])
     prev = i
 
-data = {"candles": [[T[k], *(round(float(v), 1) for v in r)] for k, r in enumerate(df[["open", "high", "low", "close"]].to_numpy())],
+# Zones at the reversals (the main chart's zone rules): the candle of the extreme before each MSS (the bottom of a reversal
+# up = demand, the top of a reversal down = supply); a candle taller than 1 % only its wick, at least 0.5 % tall. Shown
+# from the MSS candle; ends at the first candle that trades back into it (the fill), that trades through it, or at the
+# next opposite MSS. Trade (the main chart's entry plan): entry at the zone edge, stop beyond the zone (at least 0.5 %),
+# target the extreme of the move between the zone candle and the fill (at least 2R, else no trade); a candle hitting
+# both stop and target is a loss; R after 0.05 % fee per side.
+WIDE_ZONE_, MIN_ZONE_, MIN_STOP_, MIN_RR_, FEE_ = 1.0, 0.5, 0.5, 2.0, 0.05
+zones = []
+for q, (i, d, level, _) in enumerate(mss):
+    t0 = rev[q][0]; e = ns["t_idx"][t0]
+    nxt = mss[q + 1][0] if q + 1 < len(mss) else len(df)
+    Hs, Ls, Os, Cs = (H, L, O, C) if d > 0 else (-L, -H, -O, -C)       # longs; supply mirrored
+    top, bot = Hs[e], Ls[e]
+    if (top - bot) / abs(bot) * 100 > WIDE_ZONE_:
+        top = max(min(Os[e], Cs[e]), bot + MIN_ZONE_ / 100 * abs(bot))
+    end, f = None, None
+    for k in range(i + 1, min(nxt + 1, len(df))):
+        if k == nxt:
+            end = k; break
+        if Ls[k] <= top:
+            end = f = k; break
+    trade = None
+    if f is not None:
+        x = top; risk = max(x - bot, MIN_STOP_ / 100 * abs(x))
+        tgt = Hs[e + 1:f].max()
+        rr = (tgt - x) / risk
+        if rr >= MIN_RR_:
+            for k in range(f, len(df)):
+                if Ls[k] <= x - risk:
+                    trade = ["loss", T[f], T[k], round(-1 - 2 * FEE_ / (risk / abs(x) * 100), 2)]; break
+                if k > f and Hs[k] >= tgt:
+                    trade = ["win", T[f], T[k], round(rr - 2 * FEE_ / (risk / abs(x) * 100), 2)]; break
+    zt, zb = (top, bot) if d > 0 else (-bot, -top)
+    zones.append([t0, T[i], None if end is None else T[end], round(float(zt), 1), round(float(zb), 1), d, trade])
+
+data = {"zones": zones, "candles": [[T[k], *(round(float(v), 1) for v in r)] for k, r in enumerate(df[["open", "high", "low", "close"]].to_numpy())],
         "legs": legs, "bias": [float(b) for b in bias], "rev": rev, "n": REV_N, "minLeg": REV_MIN_LEG, "power": REV_POWER}
 page = (HERE / "template_reversal.html").read_text(encoding="utf-8").replace("__DATA__", json.dumps(data, separators=(",", ":")))
 (HERE / "reversal_chart.html").write_text(page, encoding="utf-8")
 up = [r for r in rev if r[4] > 0]; dn = [r for r in rev if r[4] < 0]
+for d_, name in ((1, "demand (longs)"), (-1, "supply (shorts)")):
+    tr_ = [z[6] for z in zones if z[5] == d_ and z[6]]
+    if tr_:
+        net = np.array([t[3] for t in tr_])
+        print(f"{name}: {sum(z[5] == d_ for z in zones)} zones, {len(tr_)} trades, win {np.mean(net > 0) * 100:.0f}%, total {net.sum():+.1f}R, avg {net.mean():+.2f}R")
 print(f"{len(df)} candles, {len(legs)} 4-candle leg swings, {len(up)} reversals up / {len(dn)} down "
       f"(median follow-through {np.median([r[5] for r in up]):.1f}% / {np.median([r[5] for r in dn]):.1f}%), {len(page) / 1e6:.2f} MB")
