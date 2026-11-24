@@ -279,6 +279,26 @@ which the ranking never saw. Supply: 96 combinations, demand: 432.
 - The supply change makes more zones (72 instead of 39 on the 2-year chart): the softer drop adds zones, the
   confirmed-trend rule removes the ones at the start of a reversal.
 
+## 7d. Discount / premium zones (tested 2026-11-24, not kept)
+
+Idea: more zones by also using zones in the discount half of the live range for longs (zone top <= the 50 % level between
+the MSS level (HL) and the MSB level (HH), zone bottom >= the HL), and the premium half for shorts. Two versions, with the
+current (retuned) rules, chart trades, 1 % risk, fees included:
+
+| | trades | win | total | max DD | 2020–23 / 2024–26 |
+|---|---|---|---|---|---|
+| shorts, current | 85 | 27 % | +52.5 % | 11.9 % | +36.4 / +16.2 % |
+| shorts, new fresh zones at internal highs in the premium half (106 zones) | 52 | 15 % | −13.8 % | 19.1 % | −6.8 / −7.1 % |
+| shorts, zones dropped as not fresh, kept when in the premium half (16 zones) | 4 | 0 % | −4.5 % | | |
+| longs, current | 56 | 32 % | +33.8 % | 10.6 % | +14.2 / +19.5 % |
+| longs, new fresh zones at internal lows in the discount half (84 zones) | 47 | 17 % | −10.1 % | 16.6 % | −2.1 / −8.0 % |
+| longs, zones dropped as not fresh, kept when in the discount half | 0 | | | | |
+
+- The extra zones lose in both halves on both sides; adding them halves the result and raises the drawdown to ~17 %.
+- Almost no dropped zone is in the right half when it would be shown: a pullback low that already got touched again is
+  usually at or near the bottom of the range, not a fresh level inside it.
+- The code was not kept (scratch scripts only).
+
 ## 8. Research notes
 
 - **Continuation:** a trend makes one more MSB about 50% of the time. SMA filters and other swing sizes don't change that (see `ms_research_summary.md`).
