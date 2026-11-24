@@ -33,8 +33,9 @@ from structure import analyze_bos_structure, bos_pivot_list
 src = (Path(__file__).parent / "build_structure_chart.py").read_text(encoding="utf-8")
 ns = {"analyze_bos_structure": analyze_bos_structure, "bos_pivot_list": bos_pivot_list, "pd": pd, "bisect": bisect, "heapq": __import__("heapq"), "_MEMO": {}}
 for node in ast.parse(src).body:
-    if isinstance(node, ast.FunctionDef) or (isinstance(node, ast.Assign) and any(
-            getattr(t, "id", None) == "LEG_N" for t in getattr(node.targets[0], "elts", []))):
+    if isinstance(node, ast.FunctionDef) or (isinstance(node, ast.Assign) and (any(
+            getattr(t, "id", None) == "LEG_N" for t in getattr(node.targets[0], "elts", []))
+            or getattr(node.targets[0], "id", None) == "STRUCT_MODE")):
         exec(compile(ast.Module([node], []), "build_structure_chart.py", "exec"), ns)
 
 files = sorted(Path(REPO, "data").glob("BTC_1h_*_index_signal_*.csv"), key=lambda p: p.stat().st_mtime)

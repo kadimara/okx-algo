@@ -41,7 +41,7 @@ The base swings from 1a–1c are reduced to **leg swings**:
 
 The first and last swing always stay; the last leg is still forming.
 
-**Option `MERGE_EXTREME` (tested 2026-11-24, off).** Step 2 removes both swings of the smallest leg, so for one
+**Keep-extreme merge (tested 2026-11-24; for the whole structure removed from the code, kept only for the supply-zone check, see §7).** Step 2 removes both swings of the smallest leg, so for one
 rebuild a lower high can stand in for a higher one (25–26 Sep 2026: 84,341 replaced 85,256). With `MERGE_EXTREME` the
 most extreme swings stay: for l, a, b, r with a -> b the smallest leg, drop b and r when a is more extreme than r,
 else drop l and a when b is more extreme than l, else a and b as before. Over 4 years the trend, breaks and MSSes stay
@@ -117,7 +117,7 @@ Internal swings are drawn faded.
   - After an MSS the bias is **grey** (±0.5) until the new trend makes its first MSB; that MSB confirms the new trend.
   - If price instead breaks back in the old direction first, the MSS **failed** and the bias returns to the old trend's colour from that close.
 
-### Settled legs (option, `SETTLED_LEGS = True`, tested 2026-11-24)
+### Settled legs (tested 2026-11-24, removed from the code)
 At each rebuild only the newest 1–2 swings can still change (measured over 1,400 rebuilds: 54 % nothing changes,
 15 % the newest swing, 31 % the newest two, never older). A swing that can still be merged away can briefly become
 the MSS level (e.g. the LH 64,246 on 4 Aug 2026: its leg in was 3.2 %, the pullback after it only 1.2 %).
@@ -134,15 +134,15 @@ The newest swing never counts yet.
 
 The structure is much calmer, but the bias reacts later, and the shorts lose their edge. The default stays `False`.
 
-## 6b. Body-break structure (option, `STRUCT_MODE = "body"`)
+## 6b. Body-break structure (tested 2026-11-24, removed from the code)
 
 An alternative structure, built causally in one pass (`body_structure`), so live = hindsight:
 - **Swings:** pure 8-candle swings (§1a, §1b), with no 2.5 % leg merge.
 - **Levels:** the structural high / low as in §2–§3, but the level is the **body edge** of the swing candle: max(open, close) for a high, min(open, close) for a low.
 - **Break (MSB / MSS):** the first candle whose **open and close** are both beyond the level. A wick, or a candle that opens inside and closes beyond, is not a break.
 - **Swing at a break:** the extreme of the leg into the break (the lowest low since the broken high, or the highest high since the broken low) becomes the new HL / LH. It is inserted as a swing if it isn't one.
-  - `EARLY_SWING = "break"`: at the break candle.
-  - `EARLY_SWING = "wait"`: once that extreme is 8 candles old, so a pullback shows first. Until then that side has no level.
+  - "break": at the break candle.
+  - "wait": once that extreme is 8 candles old, so a pullback shows first. Until then that side has no level.
 - **Sweep (×, chart only):** the first wick beyond a structural swing's wick without a body break, and with no break within 3 candles.
 
 Test (2026-11-24, 4 years of data, 1 % risk per trade):
@@ -201,7 +201,7 @@ Example: the 8-candle high of 29 Sep 2026 (84,560, a leg of only 2.4 % into it, 
 Known quirk: when `merge_legs` removes a small leg it removes both of its swings, so for one rebuild a lower high can
 stand in for a higher one (25–26 Sep 2026: 84,341 replaced 85,256 until the next rebuild); such a zone then ends early.
 Fixed for supply zones (`ZONE_MERGE_EXTREME = "supply"`, 2026-11-24): the real-leg check of supply zones uses legs
-merged with MERGE_EXTREME (the most extreme swings stay); the structure, bias and demand zones keep the normal merge.
+merged with the keep-extreme merge (`merge_legs(extreme=True)`, the most extreme swings stay); the structure, bias and demand zones keep the normal merge.
 The 25 Sep zone now lives until the fill (27 Sep 05:00) and wins +1.9R. Shorts confirmed trend +18.0 % -> +18.7 %
 (26 trades), chart rules +12.3 % -> +14.1 % (36 trades); demand unchanged (+31.8 % at a HL). With the fix for demand
 too (True), demand drops to +25.1 %.
@@ -224,3 +224,9 @@ The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
 
 - **Continuation:** a trend makes one more MSB about 50% of the time. SMA filters and other swing sizes don't change that (see `ms_research_summary.md`).
 - **Sideways** (`backtest_sideways.py`): "last 3 legs < X %" does pick out quieter periods (next-24h range 2.4–2.8 % vs 3.7–4.2 %). But following the live trend earns the same in and out of those periods (≈ +0.02 % per 24h, so practically no edge). Going flat while sideways therefore only adds trades and fees. Range vs ATR does not find quieter periods.
+
+## 9. Cleanup (2026-11-24)
+Removed from the code after testing (results above and in the commit history): the body-break structure with its sweep
+markers and early-swing setting, the 10 % retrace leg rule, settled legs, the keep-extreme merge for the whole structure,
+the reversal study chart (4-candle reversals with a power filter) and the long-setups sketch. The fast-MSS, reversal-long
+and sweep tests ran in scratch scripts and were never part of the code.
