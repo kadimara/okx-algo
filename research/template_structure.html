@@ -69,7 +69,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       <button data-days="365">1Y</button>
       <button data-days="0">All</button>
     </div>
-    <button class="shot" id="shot" type="button" title="Save the chart as a PNG">Screenshot</button>
+    <button class="shot" id="copy" type="button" title="Copy the chart to the clipboard as an image">Copy chart</button>
+    <button class="shot" id="shot" type="button" title="Save the chart as a PNG">Save chart</button>
     <div class="toggles">
       <label><input type="checkbox" id="tSw" checked><span class="sw" style="background:var(--fg)"></span>Swings</label>
       <label><input type="checkbox" id="tInt" checked><span class="sw" style="background:var(--muted)"></span>Internal swings</label>
@@ -312,6 +313,21 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     g.drawImage(img, 0, head);
     return cv;
   }
+  // Copy: the same image to the clipboard. The blob is passed as a promise so the write starts inside the click
+  // (Safari needs that). If the clipboard is blocked here (no permission in this frame), save the file instead.
+  $("copy").addEventListener("click", async () => {
+    const btn = $("copy"), label = "Copy chart";
+    const blob = new Promise(res => shotCanvas().toBlob(res, "image/png"));
+    try {
+      if (!navigator.clipboard || !window.ClipboardItem) throw new Error("no clipboard");
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      btn.textContent = "Copied";
+    } catch (e) {
+      btn.textContent = "Copy blocked: saving";
+      $("shot").click();
+    }
+    setTimeout(() => { btn.textContent = label; }, 1800);
+  });
   $("shot").addEventListener("click", async () => {
     const btn = $("shot"), cv = shotCanvas();
     const vr = chart.timeScale().getVisibleRange(), end = new Date(((vr && vr.to) || C[C.length - 1][0]) * 1000);
@@ -327,8 +343,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     if (!dl) return;
     btn.disabled = true;
     try { await dl.save({ filename: name, data: bytes }); btn.textContent = "Saved"; }
-    catch (e) { btn.textContent = e && e.code === "declined" ? "Screenshot" : "Not saved"; if (e && /unavailable|not_granted|capability_|host_unavailable/.test(e.code)) btn.hidden = true; }
-    finally { btn.disabled = false; setTimeout(() => { btn.textContent = "Screenshot"; }, 1500); }
+    catch (e) { btn.textContent = e && e.code === "declined" ? "Save chart" : "Not saved"; if (e && /unavailable|not_granted|capability_|host_unavailable/.test(e.code)) btn.hidden = true; }
+    finally { btn.disabled = false; setTimeout(() => { btn.textContent = "Save chart"; }, 1500); }
   });
 
   draw();
