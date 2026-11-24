@@ -437,7 +437,7 @@ leg_bias = bias_bar(live_trend, live_breaks)
 # get looser rules: no bearish bias needed (shown from confirmation, not ended by the bias) and touches before
 # confirmation do not count. The other end rules (touch after it is known, higher high, newer leg high) still apply.
 # [tCandle, tEnd (None = still active), top, bottom, sharp (1/0), at a LH (1/0)]
-SHARP_K, SHARP_ATR = 4, 2.0
+SHARP_K, SHARP_ATR = 6, 1.5   # retuned 2026-11-24 on the ATR legs (backtest_retune.py; was 4, 2.0)
 DRAW_GREY = False     # zones without the very sharp drop (grey on the chart): off for now
 # A zone candle taller than WIDE_ZONE % becomes its upper wick: from the high down to the body high (max of open and
 # close), but at least MIN_ZONE % tall. The sharp-drop test still uses the candle low.
@@ -447,7 +447,7 @@ WIDE_ZONE, MIN_ZONE = 1.0, 0.5
 LH_BIAS = True
 # SUPPLY_MSS_OK / DEMAND_MSS_OK: a pending MSS in the zone's direction counts as the right bias (bias bar faded: -0.5 bearish MSS for supply,
 # +0.5 bullish MSS for demand), so zones at the start of a reversal are shown before the first MSB confirms it.
-SUPPLY_MSS_OK, DEMAND_MSS_OK = True, True   # per side: shorts also in a bearish MSS, longs also in a bullish MSS
+SUPPLY_MSS_OK, DEMAND_MSS_OK = False, True   # per side: shorts only in a confirmed downtrend (retuned 2026-11-24), longs also in a bullish MSS
 # COUNTER_MSS_ENDS: a shown zone ends when the bias leaves its side, also for a pending MSS against it (often from a
 # small internal break). False = only a confirmed opposite trend ends it (supply: bias +1, demand: bias -1).
 COUNTER_MSS_ENDS = True

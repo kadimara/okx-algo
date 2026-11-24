@@ -210,7 +210,7 @@ The zone rules were tuned on the current structure. The default stays `"structur
 ## 7. Supply zones (chart)
 
 - **The zone:** each 8-candle swing high, as confirmed live, spanning the full high-to-low range of the candle that made the high. A candle taller than 1 % (`WIDE_ZONE`) gives only its upper wick: from the high down to the body high (the higher of open and close), at least 0.5 % tall (`MIN_ZONE`). The sharp-drop test below still uses the candle low.
-- **Very sharp move down:** only zones price left very sharply: within 4 candles after the zone candle, a low at least 2 × ATR(14) (Wilder, as of the swing-high candle) below the zone bottom (`SHARP_K`, `SHARP_ATR`; until 23 Nov 2026 this was 1 × ATR within 6 candles). A red zone only counts as known from the later of the swing-high confirmation and the candle that completes the drop, so it adds no hindsight. Zones without it are not drawn for now (`DRAW_GREY`).
+- **Very sharp move down:** only zones price left very sharply: within 6 candles after the zone candle, a low at least 1.5 × ATR(14) (Wilder, as of the swing-high candle) below the zone bottom (`SHARP_K`, `SHARP_ATR`; 1 × ATR within 6 candles until 23 Nov 2026, 2 × ATR within 4 candles until the retune of 24 Nov, §7c). A red zone only counts as known from the later of the swing-high confirmation and the candle that completes the drop, so it adds no hindsight. Zones without it are not drawn for now (`DRAW_GREY`).
 - **When it is drawn:** the box starts at that candle. It is only drawn if the zone became known while the live bias was bearish (red, not grey), and before price traded back into it.
 - **Zones at a LH:** a swing high that is the top of a pullback of at least `MIN_LEG` % up from the leg low, and below the previous leg high (leg swings as known at its confirmation). Touches before the confirmation do not count. Since 23 Nov 2026 they also need the bearish live bias like the other zones (`LH_BIAS = True`): without it (the earlier looser rule: drawn whatever the bias, not ended by a bias change) they gave the long losing runs in the backtest.
 - **When it ends:** at the first of these:
@@ -252,7 +252,32 @@ The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
 - **Zones at a HL:** the bottom of a pullback of at least `MIN_LEG` % down from the leg high, above the previous leg low. Touches before the confirmation do not count; they need the bullish bias like the others (`LH_BIAS`).
 - **When it ends:** at the first of: a candle that trades back into it after price left it (a low above it first); a lower low; the live bias stops being bullish; a newer leg low settles.
 
-**Bias for the zones (since 23 Nov 2026, per side):** supply zones are shown in a bearish trend or a pending bearish MSS (bias bar red or faded red, `SUPPLY_MSS_OK = True`); demand zones in a bullish trend or a pending bullish MSS (green or faded green, `DEMAND_MSS_OK = True`). A zone ends when the bias leaves that set (`COUNTER_MSS_ENDS = True`). The chart's bias bar shows this live bias (it was the hindsight trend).
+**Bias for the zones (per side):** supply zones are shown only in a confirmed bearish trend (bias bar solid red, `SUPPLY_MSS_OK = False` since the retune of 24 Nov 2026, §7c; from 23 Nov also in a pending bearish MSS); demand zones in a bullish trend or a pending bullish MSS (green or faded green, `DEMAND_MSS_OK = True`). A zone ends when the bias leaves that set (`COUNTER_MSS_ENDS = True`). The chart's bias bar shows this live bias (it was the hindsight trend).
+
+## 7c. Zone rules retuned on the ATR legs (2026-11-24)
+
+`research/backtest_retune.py`: a grid of each side's zone rules on the ATR-leg structure, with the chart's own trades
+(`zone_trades`, 1 % risk, fees included). Ranked on **2020–2023 only (train)**, then checked on **2024 → Nov 2026 (test)**,
+which the ranking never saw. Supply: 96 combinations, demand: 432.
+
+| | rule | train 2020–23 | test 2024–26 | all | losing years |
+|---|---|---|---|---|---|
+| supply, before | 2 ATR in 4 candles, also in a bearish MSS | 29 trades, +3.5 % | 30, +7.9 % | +11.4 % | 3 |
+| **supply, now** | **1.5 ATR in 6 candles, confirmed downtrend only** | 40, **+36.4 %**, DD 11.9 % | 45, **+16.2 %**, DD 10.1 % | **+52.5 %** | **0** |
+| demand (unchanged) | 1.5 ATR + 1 % in 4 candles, at a HL, bullish MSS too, a bearish MSS keeps the zone | 35, +14.2 % | 21, +19.5 %, DD 5.4 % | +33.8 % | 1 |
+
+- The best single train score does not carry over (the rank correlation of train and test over all combinations is only
+  +0.14 for supply, +0.21 for demand), so the choice was made on what is **consistent in both halves**, averaged over the
+  rest of the grid, not on the top row.
+- **Supply:** the clear one is `SUPPLY_MSS_OK = False` (shorts only in a confirmed downtrend): +23.1 / +12.0 % (train / test)
+  on average vs +0.8 / +2.1 % with a pending MSS allowed. A 1.5 ATR drop beats 1, 2 and 2.5 in both halves. All 12
+  neighbours with a confirmed trend and 1.5–2 ATR within 4–8 candles are positive in both halves (test +7.3 … +24.4 %).
+  `SUPPLY_MIN_PCT` and `COUNTER_MSS_ENDS` make no consistent difference, so they stay (0 %, True).
+- **Demand:** the current rule already has every choice that is consistent in both halves (4 candles, 1.5 ATR, a bullish
+  MSS counts, a bearish MSS does not end the zone), and its test result (+19.5 %) beats almost all of the train top 15.
+  Unchanged. 12 candles, 1 ATR and "after a HH" looked good on train and failed on test.
+- The supply change makes more zones (72 instead of 39 on the 2-year chart): the softer drop adds zones, the
+  confirmed-trend rule removes the ones at the start of a reversal.
 
 ## 8. Research notes
 
