@@ -909,25 +909,30 @@ def zone_trades(df, zones, side, bias, start, lim, keep_mss=False):
     return out
 
 
-# Weekly zones (visual only): the 1h candle of each weekly swing high / low (the highest high / lowest low of WEEK_N
-# candles on each side, i.e. +-3.5 days), as a zone like the 1h zones (a candle taller than WIDE_ZONE % only its wick,
-# at least MIN_ZONE % tall). Known WEEK_N candles after the swing; from then on it ends at the first candle that trades
-# back into it after price left it, or that trades through it. [t swing candle, t known, t end (None = active), top, bottom]
-WEEK_N = 84
+# Weekly zones (visual only): each weekly swing high / low (the highest high / lowest low of WEEK_N 1h candles on each
+# side, i.e. +-7 days) gets the wick of its DAILY candle (UTC day) as the zone: supply from the day's high down to its
+# body high (max of the day's open and close), demand from the day's low up to its body low; at least MIN_ZONE % tall.
+# Known WEEK_N candles after the swing; from then on it ends at the first candle that trades back into it after price
+# left it, or that trades through it. [t swing candle, t known, t end (None = active), top, bottom]
+WEEK_N = 168
 
 
 def weekly_zones(df, kind):
-    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
+    day = df.resample("1D").agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+    dkey = df.index.floor("1D")
     n, out, last = WEEK_N, [], -10 ** 9
     for p in range(n, len(df) - n):
-        if kind == "supply" and H[p] == H[p - n:p + n + 1].max() and p - last > n:
-            top, bot = H[p], L[p]
-            if (top - bot) / bot * 100 > WIDE_ZONE:
-                bot = min(max(O[p], C[p]), top / (1 + MIN_ZONE / 100))
-        elif kind == "demand" and L[p] == L[p - n:p + n + 1].min() and p - last > n:
-            top, bot = H[p], L[p]
-            if (top - bot) / bot * 100 > WIDE_ZONE:
-                top = max(min(O[p], C[p]), bot * (1 + MIN_ZONE / 100))
+        if p - last <= n:
+            continue
+        if kind == "supply" and H[p] == H[p - n:p + n + 1].max():
+            dd = day.loc[dkey[p]]
+            top = dd.high
+            bot = min(max(dd.open, dd.close), top / (1 + MIN_ZONE / 100))
+        elif kind == "demand" and L[p] == L[p - n:p + n + 1].min():
+            dd = day.loc[dkey[p]]
+            bot = dd.low
+            top = max(min(dd.open, dd.close), bot * (1 + MIN_ZONE / 100))
         else:
             continue
         last, c, left, end = p, p + n, False, None
@@ -938,9 +943,8 @@ def weekly_zones(df, kind):
                 end = k
                 break
             left = left or not inside
-        out.append([T[p], T[c], None if end is None else T[end], round(top, 1), round(bot, 1)])
+        out.append([T[p], T[c], None if end is None else T[end], round(float(top), 1), round(float(bot), 1)])
     return out
-
 
 def runs(vals):
     """Run-length form of a per-candle list: [[candle index, value], ...] at each change."""
