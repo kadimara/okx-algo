@@ -909,6 +909,39 @@ def zone_trades(df, zones, side, bias, start, lim, keep_mss=False):
     return out
 
 
+# Weekly zones (visual only): the 1h candle of each weekly swing high / low (the highest high / lowest low of WEEK_N
+# candles on each side, i.e. +-3.5 days), as a zone like the 1h zones (a candle taller than WIDE_ZONE % only its wick,
+# at least MIN_ZONE % tall). Known WEEK_N candles after the swing; from then on it ends at the first candle that trades
+# back into it after price left it, or that trades through it. [t swing candle, t known, t end (None = active), top, bottom]
+WEEK_N = 84
+
+
+def weekly_zones(df, kind):
+    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    n, out, last = WEEK_N, [], -10 ** 9
+    for p in range(n, len(df) - n):
+        if kind == "supply" and H[p] == H[p - n:p + n + 1].max() and p - last > n:
+            top, bot = H[p], L[p]
+            if (top - bot) / bot * 100 > WIDE_ZONE:
+                bot = min(max(O[p], C[p]), top / (1 + MIN_ZONE / 100))
+        elif kind == "demand" and L[p] == L[p - n:p + n + 1].min() and p - last > n:
+            top, bot = H[p], L[p]
+            if (top - bot) / bot * 100 > WIDE_ZONE:
+                top = max(min(O[p], C[p]), bot * (1 + MIN_ZONE / 100))
+        else:
+            continue
+        last, c, left, end = p, p + n, False, None
+        for k in range(c, len(df)):
+            inside = (H[k] >= bot) if kind == "supply" else (L[k] <= top)
+            through = (H[k] > top) if kind == "supply" else (L[k] < bot)
+            if through or (left and inside):
+                end = k
+                break
+            left = left or not inside
+        out.append([T[p], T[c], None if end is None else T[end], round(top, 1), round(bot, 1)])
+    return out
+
+
 def runs(vals):
     """Run-length form of a per-candle list: [[candle index, value], ...] at each change."""
     out = []
@@ -921,6 +954,7 @@ data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles":
         # Legs, live: swings, MSS / MSB and zones as the live structure knew them at the right edge of the view (no hindsight)
         "rb": live_lab.get("rb", []), "lvMss": runs(live_lab.get("mss", [])), "lvMsb": runs(live_lab.get("msb", [])),
         "supplyShown": supply_shown, "demandShown": demand_shown, "legLevels": live_lab["levels"],
+        "weekSupply": weekly_zones(sig, "supply"), "weekDemand": weekly_zones(sig, "demand"),
         "supplyTrades": zone_trades(sig, supply, "short", leg_bias, swing_start, 0.5 if SUPPLY_MSS_OK else 1),
         "demandTrades": zone_trades(sig, demand, "long", leg_bias, swing_start_low, 0.5 if DEMAND_MSS_OK else 1,
                                     keep_mss=not DEMAND_COUNTER_MSS_ENDS),
