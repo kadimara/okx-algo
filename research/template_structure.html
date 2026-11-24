@@ -262,7 +262,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
           if (tr && tr[0] && tr[2] <= te) {
             const win = tr[0] === "win";
             ctx.globalAlpha = 1; ctx.fillStyle = win ? areas.cols.up : areas.cols.down;
-            ctx.fillText(`${win ? "\u2713" : "\u2717"} ${tr[3] > 0 ? "+" : "\u2212"}${Math.abs(tr[3]).toFixed(1)}R`, x2 + 4 * hr, (y1 + y2) / 2 * vr);
+            ctx.fillText(`${win ? "\u2713" : "\u2717"} ${tr[3] > 0 ? "+" : "\u2212"}${Math.abs(tr[3]).toFixed(1)}R`, Math.max(x1, 0) + 4 * hr, (y1 + y2) / 2 * vr);   // inside the box, at its left
           }
         }
         ctx.globalAlpha = 1;
