@@ -909,40 +909,6 @@ def zone_trades(df, zones, side, bias, start, lim, keep_mss=False):
     return out
 
 
-# Weekly zones (visual only): each weekly swing high / low (the highest high / lowest low of WEEK_N 1h candles on each
-# side, i.e. +-7 days) gets its whole DAILY candle (UTC day, high to low) as the zone.
-# Known WEEK_N candles after the swing; from then on it ends at the first candle that trades back into it after price
-# left it, or that trades through it. [t swing candle, t known, t end (None = active), top, bottom]
-WEEK_N = 168
-
-
-def weekly_zones(df, kind):
-    H, L = df["high"].to_numpy(float), df["low"].to_numpy(float)
-    day = df.resample("1D").agg({"open": "first", "high": "max", "low": "min", "close": "last"})
-    dkey = df.index.floor("1D")
-    n, out, last = WEEK_N, [], -10 ** 9
-    for p in range(n, len(df) - n):
-        if p - last <= n:
-            continue
-        if kind == "supply" and H[p] == H[p - n:p + n + 1].max():
-            dd = day.loc[dkey[p]]
-            top, bot = dd.high, dd.low
-        elif kind == "demand" and L[p] == L[p - n:p + n + 1].min():
-            dd = day.loc[dkey[p]]
-            top, bot = dd.high, dd.low
-        else:
-            continue
-        last, c, left, end = p, p + n, False, None
-        for k in range(c, len(df)):
-            inside = (H[k] >= bot) if kind == "supply" else (L[k] <= top)
-            through = (H[k] > top) if kind == "supply" else (L[k] < bot)
-            if through or (left and inside):
-                end = k
-                break
-            left = left or not inside
-        out.append([T[p], T[c], None if end is None else T[end], round(float(top), 1), round(float(bot), 1)])
-    return out
-
 def runs(vals):
     """Run-length form of a per-candle list: [[candle index, value], ...] at each change."""
     out = []
@@ -955,7 +921,6 @@ data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles":
         # Legs, live: swings, MSS / MSB and zones as the live structure knew them at the right edge of the view (no hindsight)
         "rb": live_lab.get("rb", []), "lvMss": runs(live_lab.get("mss", [])), "lvMsb": runs(live_lab.get("msb", [])),
         "supplyShown": supply_shown, "demandShown": demand_shown, "legLevels": live_lab["levels"],
-        "weekSupply": weekly_zones(sig, "supply"), "weekDemand": weekly_zones(sig, "demand"),
         "supplyTrades": zone_trades(sig, supply, "short", leg_bias, swing_start, 0.5 if SUPPLY_MSS_OK else 1),
         "demandTrades": zone_trades(sig, demand, "long", leg_bias, swing_start_low, 0.5 if DEMAND_MSS_OK else 1,
                                     keep_mss=not DEMAND_COUNTER_MSS_ENDS),
