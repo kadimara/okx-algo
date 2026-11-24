@@ -235,8 +235,8 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       const ts = this.chart.timeScale(), s = this.series, bar = ts.options().barSpacing || 6;
       target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
         ctx.lineWidth = Math.max(1, Math.round(hr));
-        let zs = [...(show.sz ? D.supply.map((z, i) => [...z.slice(0, 5), areas.cols.down, (D.supplyShown || [])[i]]) : []),
-                  ...(show.dz ? (D.demand || []).map((z, i) => [...z.slice(0, 5), areas.cols.up, (D.demandShown || [])[i]]) : [])];
+        let zs = [...(show.sz ? D.supply.map((z, i) => [...z.slice(0, 5), areas.cols.down, (D.supplyShown || [])[i], (D.supplyTrades || [])[i]]) : []),
+                  ...(show.dz ? (D.demand || []).map((z, i) => [...z.slice(0, 5), areas.cols.up, (D.demandShown || [])[i], (D.demandTrades || [])[i]]) : [])];
         const xe = atEdge() ? ts.logicalToCoordinate(edge) : null;
         if (atEdge()) {                               // as known at the right edge: shown by then, still active if it ended later
           const te = T[edge], legs = new Set(rowsAt(te).map(r => r[0] + r[1]));
@@ -244,7 +244,9 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
           zs = zs.filter(z => (z[6] == null || z[6] <= te) && legs.has(z[0] + (z[5] === areas.cols.down ? "h" : "l")))
                  .map(z => z[1] != null && z[1] > te ? [z[0], null, ...z.slice(2)] : z);
         }
-        for (const [t0, t1, top, bot, sharp, col] of zs) {
+        const te = atEdge() ? T[edge] : Infinity;
+        ctx.font = `600 ${Math.round(10 * vr)}px ${areas.font}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+        for (const [t0, t1, top, bot, sharp, col, , tr] of zs) {
           if (!sharp && !show.szg) continue;
           ctx.strokeStyle = ctx.fillStyle = sharp ? col : areas.cols.grey;
           const xa = ts.logicalToCoordinate(tIdx.get(t0)), xb = t1 == null ? null : ts.logicalToCoordinate(tIdx.get(t1));
@@ -256,6 +258,12 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
           const h = Math.max(1, (y2 - y1) * vr);
           ctx.globalAlpha = t1 == null ? 0.25 : 0.14; ctx.fillRect(x1, y1 * vr, x2 - x1, h);
           ctx.globalAlpha = t1 == null ? 0.9 : 0.5; ctx.strokeRect(x1, y1 * vr, x2 - x1, h);
+          // the zone's trade (backtest entry plan), once it is closed by the right edge: \u2713 target hit, \u2717 stopped
+          if (tr && tr[0] && tr[2] <= te) {
+            const win = tr[0] === "win";
+            ctx.globalAlpha = 1; ctx.fillStyle = win ? areas.cols.up : areas.cols.down;
+            ctx.fillText(`${win ? "\u2713" : "\u2717"} ${tr[3] > 0 ? "+" : "\u2212"}${Math.abs(tr[3]).toFixed(1)}R`, x2 + 4 * hr, (y1 + y2) / 2 * vr);
+          }
         }
         ctx.globalAlpha = 1;
       });

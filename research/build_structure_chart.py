@@ -850,6 +850,60 @@ demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low, demand_shown)
 
 
 
+# Trade result per zone (the backtest's entry plan, as in backtest_zone_rules.run with entry "plan" and the drop-low /
+# rally-high target): sell at the zone bottom (buy at the top for demand), or at the body edge of the zone candle when that
+# stop would be wider than WIDE_STOP %; stop beyond the zone, at least MIN_STOP %; target the extreme of the move between
+# the zone candle and the fill, at least MIN_RR R (else no trade). Cancelled before a fill by a newer leg high / low or
+# when the bias leaves the zone's side. A candle hitting both stop and target is a loss. R after FEE % per side.
+MIN_RR, FEE, MIN_STOP, WIDE_STOP = 2, 0.05, 0.5, 1.0
+
+
+def zone_trades(df, zones, side, bias, start, lim, keep_mss=False):
+    """Per zone [result "win" / "loss" / None (no trade or still open), fill time, exit time, R after fees]."""
+    O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+    b = np.asarray(bias, float)
+    if side == "long":
+        H, L, O, C, b = -L, -H, -O, -C, -b
+    out = []
+    for z in zones:
+        t0, t1, top, bot = z[:4]
+        if side == "long":
+            top, bot = -bot, -top
+        res = [None, None, None, None]
+        out.append(res)
+        if t1 is None:
+            continue
+        j, e = t_idx[t0], t_idx[t1]
+        if H[e] < bot:                                  # ended without a touch
+            continue
+        x = bot if (top - bot) / abs(bot) * 100 <= WIDE_STOP else max(O[j], C[j])
+        risk = max(top - x, MIN_STOP / 100 * abs(x))
+        f = None
+        for k in range(e, len(df)):
+            if H[k] >= x:
+                f = k
+                break
+            if (start[k] is not None and start[k] > t0) or (b[k] >= 1 if keep_mss else b[k] > -lim):
+                break
+        if f is None:
+            continue
+        lo = L[j + 1:f].min()
+        rr = (x - lo) / risk
+        if rr < MIN_RR - 1e-9:
+            continue
+        for k in range(f, len(df)):
+            if H[k] >= x + risk:
+                r, kind = -1.0, "loss"
+                break
+            if k > f and L[k] <= lo:
+                r, kind = rr, "win"
+                break
+        else:
+            continue
+        res[:] = [kind, T[f], T[k], round(r - 2 * FEE / (risk / abs(x) * 100), 2)]
+    return out
+
+
 def runs(vals):
     """Run-length form of a per-candle list: [[candle index, value], ...] at each change."""
     out = []
@@ -862,6 +916,9 @@ data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles":
         # Legs, live: swings, MSS / MSB and zones as the live structure knew them at the right edge of the view (no hindsight)
         "rb": live_lab.get("rb", []), "lvMss": runs(live_lab.get("mss", [])), "lvMsb": runs(live_lab.get("msb", [])),
         "supplyShown": supply_shown, "demandShown": demand_shown, "legLevels": live_lab["levels"],
+        "supplyTrades": zone_trades(sig, supply, "short", leg_bias, swing_start, 0.5 if SUPPLY_MSS_OK else 1),
+        "demandTrades": zone_trades(sig, demand, "long", leg_bias, swing_start_low, 0.5 if DEMAND_MSS_OK else 1,
+                                    keep_mss=not DEMAND_COUNTER_MSS_ENDS),
         "legsHind": legs, "legLevelsHind": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
         "legN": LEG_N, "minLeg": MIN_LEG, "structMode": STRUCT_MODE,
         "sweeps": body_structure(sig, LEG_N)["sweeps"] if STRUCT_MODE == "body" else []}
