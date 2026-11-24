@@ -319,6 +319,7 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
     # The chart's right-edge view (no hindsight): the swing rows of each rebuild, diff encoded against the running list G
     # ([c, n, tail]: G = G[:n] + tail from candle c on), and the MSS / MSB per candle ([time, price] or None).
     G, rb = [], []
+    legsets = []                                    # per rebuild: [candle, {(pivot time, type)} of the real leg swings]
     H_, L_ = df["high"].to_numpy(float), df["low"].to_numpy(float)
     lv_mss, lv_msb = [None] * len(df), [None] * len(df)
     for e, c in enumerate(events):
@@ -330,6 +331,8 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
         Ps = P                                      # SETTLED_LEGS: only swings with a real leg after them count
         if SETTLED_LEGS and len(P) > 4:
             Ps = P[:-1] if leg_big_enough(P[:-1], P[-1][2]) else P[:-2]
+        real = Ps if len(Ps) < 2 or leg_big_enough(Ps[:-1], Ps[-1][2]) else Ps[:-1]
+        legsets.append((c, {(q[0], q[1]) for q in real}))
         i0 = t_idx[P[0][0]]
         track = [] if labels else None
         st = structure(close, Ps, i0, c2, track)
@@ -379,6 +382,7 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
                     lv_msb[i] = [T[ext], round(float(L_[ext] if tr_ < 0 else H_[ext]), 1)]
     for b in breaks:
         b[3] = trend[b[0] - 1]
+    _MEMO[("legsets", n, min_leg, len(df), T[0], T[-1])] = ([x[0] for x in legsets], [x[1] for x in legsets])
     out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
     if not labels:
         return out
@@ -624,7 +628,9 @@ SUPPLY_MSS_OK, DEMAND_MSS_OK = True, True   # per side: shorts also in a bearish
 COUNTER_MSS_ENDS = True
 # Minimum size of the sharp move in % beyond the zone candle (on top of SHARP_ATR x ATR): in quiet markets 2 ATR can be
 # only ~1 %, which does not look sharp. 0 = ATR only.
-SUPPLY_MIN_PCT, DEMAND_MIN_PCT = 0.0, 1.0
+SUPPLY_MIN_PCT, DEMAND_MIN_PCT, ZONE_REAL_LEG = 0.0, 1.0, True
+# ZONE_REAL_LEG: a zone only counts while its swing is a real leg swing of the live structure (in the legs of the latest
+# rebuild; the newest swing only once the leg into it is >= MIN_LEG): not shown before, ended when it is merged away.
 
 
 def wilder_atr(df, length=14):
@@ -659,6 +665,7 @@ def supply_zones(df, n, bias, start, shown_out=None):
     atr = wilder_atr(df)
     ev = swing_events(df, n)
     conf_i = [t_idx[p[3]] for p in ev]
+    real = leg_ok_fn(df, n) if ZONE_REAL_LEG else None
     out = []
     for t, ty, price, conf in ev:
         if ty != "h":
@@ -672,7 +679,8 @@ def supply_zones(df, n, bias, start, shown_out=None):
             c = max(c, j + 1 + int(hit[0]))                    # a sharp zone is only known once the drop has happened
         if (top - bot) / bot * 100 > WIDE_ZONE:                # a wide candle: the zone is its upper wick
             bot = min(max(O[j], C[j]), top / (1 + MIN_ZONE / 100))
-        shown, end = zone_life(H, j, c, top, bot, t, bias, start, lh, need_bias=not lh or LH_BIAS)
+        okf = (lambda k, t=t: real(t, "h", k)) if real else None
+        shown, end = zone_life(H, j, c, top, bot, t, bias, start, lh, need_bias=not lh or LH_BIAS, ok=okf)
         if shown is not None and (sharp or DRAW_GREY):
             out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh)])
             if shown_out is not None:
@@ -680,18 +688,37 @@ def supply_zones(df, n, bias, start, shown_out=None):
     return out
 
 
-def zone_life(H, j, c, top, bot, t, bias, start, lh=False, need_bias=True):
+def leg_ok_fn(df, n):
+    """ok(t, ty, k): is the swing (pivot time t, type ty) a real leg swing in the latest live rebuild at or before candle k
+    (ZONE_REAL_LEG)? Always True in the body-break structure (no merging)."""
+    if STRUCT_MODE == "body":
+        return lambda t, ty, k: True
+    key = ("legsets", n, MIN_LEG, len(df), T[0], T[-1])
+    if key not in _MEMO:
+        live_structure(df, n, MIN_LEG)
+    cs, sets = _MEMO[key]
+
+    def ok(t, ty, k):
+        r = bisect.bisect_right(cs, k) - 1
+        return r >= 0 and (t, ty) in sets[r]
+    return ok
+
+
+def zone_life(H, j, c, top, bot, t, bias, start, lh=False, need_bias=True, ok=None):
     """When a zone at candle j (known from the close of candle c) is shown and ends: (shown, end) candle indices, None
     when it is never shown / still active. See the supply-zone rules above. lh: touches before c do not count;
-    need_bias: shown only with a bearish live bias and ended when the bias stops being bearish."""
+    need_bias: shown only with a bearish live bias and ended when the bias stops being bearish; ok(k): its swing is a real
+    leg at candle k (ZONE_REAL_LEG; not shown before, ended when not)."""
     left, shown = False, None
     for k in range(j + 1, len(H)):
+        if shown is not None and ok is not None and not ok(k):
+            return shown, k
         if H[k] > top or (left and H[k] >= bot) or (start[k] is not None and start[k] > t) \
                 or (shown is not None and need_bias and (bias[k] > -(0.5 if SUPPLY_MSS_OK else 1) if COUNTER_MSS_ENDS else bias[k] >= 1)):
             return shown, k
         if not lh or k >= c:                                   # at a LH, touches before it is known do not count
             left = left or H[k] < bot
-        if shown is None and k >= c and (not need_bias or bias[k] <= -(0.5 if SUPPLY_MSS_OK else 1)):
+        if shown is None and k >= c and (not need_bias or bias[k] <= -(0.5 if SUPPLY_MSS_OK else 1)) and (ok is None or ok(k)):
             shown = k
     return shown, None
 
@@ -752,16 +779,18 @@ def _is_higher_low(ev, conf_i, t, price, c):
     return bool(lows) and price > lows[-1][2]
 
 
-def demand_life(L, j, c, top, bot, t, bias, start, hl=False, need_bias=True):
+def demand_life(L, j, c, top, bot, t, bias, start, hl=False, need_bias=True, ok=None):
     """Mirror of zone_life for a demand zone: (shown, end) candle indices."""
     left, shown = False, None
     for k in range(j + 1, len(L)):
+        if shown is not None and ok is not None and not ok(k):
+            return shown, k
         if L[k] < bot or (left and L[k] <= top) or (start[k] is not None and start[k] > t) \
                 or (shown is not None and need_bias and (bias[k] < (0.5 if DEMAND_MSS_OK else 1) if DEMAND_COUNTER_MSS_ENDS else bias[k] <= -1)):
             return shown, k
         if not hl or k >= c:
             left = left or L[k] > top
-        if shown is None and k >= c and (not need_bias or bias[k] >= (0.5 if DEMAND_MSS_OK else 1)):
+        if shown is None and k >= c and (not need_bias or bias[k] >= (0.5 if DEMAND_MSS_OK else 1)) and (ok is None or ok(k)):
             shown = k
     return shown, None
 
@@ -771,6 +800,7 @@ def demand_zones(df, n, bias, start, shown_out=None):
     atr = wilder_atr(df)
     ev = swing_events(df, n)
     conf_i = [t_idx[p[3]] for p in ev]
+    real = leg_ok_fn(df, n) if ZONE_REAL_LEG else None
     out = []
     for t, ty, price, conf in ev:
         if ty != "l":
@@ -787,7 +817,8 @@ def demand_zones(df, n, bias, start, shown_out=None):
             c = max(c, j + 1 + int(hit[0]))
         if (top - bot) / bot * 100 > WIDE_ZONE:                # a wide candle: the zone is its lower wick
             top = max(min(O[j], C[j]), bot * (1 + MIN_ZONE / 100))
-        shown, end = demand_life(L, j, c, top, bot, t, bias, start, hl, need_bias=not hl or LH_BIAS)
+        okf = (lambda k, t=t: real(t, "l", k)) if real else None
+        shown, end = demand_life(L, j, c, top, bot, t, bias, start, hl, need_bias=not hl or LH_BIAS, ok=okf)
         if shown is not None and (sharp or DRAW_GREY):
             out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(hl), int(ahh)])
             if shown_out is not None:

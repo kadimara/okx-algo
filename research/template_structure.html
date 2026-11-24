@@ -239,8 +239,10 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
                   ...(show.dz ? (D.demand || []).map((z, i) => [...z.slice(0, 5), areas.cols.up, (D.demandShown || [])[i]]) : [])];
         const xe = atEdge() ? ts.logicalToCoordinate(edge) : null;
         if (atEdge()) {                               // as known at the right edge: shown by then, still active if it ended later
-          const te = T[edge];
-          zs = zs.filter(z => z[6] == null || z[6] <= te).map(z => z[1] != null && z[1] > te ? [z[0], null, ...z.slice(2)] : z);
+          const te = T[edge], legs = new Set(rowsAt(te).map(r => r[0] + r[1]));
+          // only zones known by then whose swing is still a leg swing then (a merged swing has no zone, like no label)
+          zs = zs.filter(z => (z[6] == null || z[6] <= te) && legs.has(z[0] + (z[5] === areas.cols.down ? "h" : "l")))
+                 .map(z => z[1] != null && z[1] > te ? [z[0], null, ...z.slice(2)] : z);
         }
         for (const [t0, t1, top, bot, sharp, col] of zs) {
           if (!sharp && !show.szg) continue;

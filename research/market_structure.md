@@ -177,6 +177,22 @@ The zone rules were tuned on the current structure. The default stays `"structur
   - the live bias stops being bearish;
   - a newer leg high settles (zones only count for the current swing).
 
+**Only at real legs (`ZONE_REAL_LEG = True`, 2026-11-24).** A supply or demand zone only counts while its swing is a real
+leg swing of the live structure: it must be in the legs of the latest rebuild, and the newest swing only once the leg
+into it is at least 2.5 %. Before that the zone is not shown; it ends as soon as a rebuild merges its swing away. On the
+chart (right-edge view), a zone whose swing is no longer a leg at that moment is hidden, like its label.
+Example: the 8-candle high of 29 Sep 2026 (84,560, a leg of only 2.4 % into it, merged at the next rebuild) no longer gets a zone.
+
+| 4 years | before | only real legs |
+|---|---|---|
+| shorts, confirmed bearish trend | 45 trades, +21.6 %, +0.48R, DD 6.8 % | 24 trades, +18.0 %, **+0.75R**, DD 6.8 % |
+| shorts, chart rules (also in a bearish MSS) | 64 trades, +13.8 %, DD 11.3 % | 35 trades, +12.3 %, DD 13.3 % |
+| demand chart rule at a HL | 38 trades, +27.1 %, DD 5.6 % | 34 trades, **+31.8 %**, DD 4.6 % |
+| demand chart rule, all zones | 77 trades, +5.6 %, DD 16.6 % | 41 trades, **+36.4 %**, DD 5.7 %, no losing year |
+
+Known quirk: when `merge_legs` removes a small leg it removes both of its swings, so for one rebuild a lower high can
+stand in for a higher one (25–26 Sep 2026: 84,341 replaced 85,256 until the next rebuild); such a zone then ends early.
+
 ## 7b. Demand zones (chart)
 
 The supply-zone rules mirrored for longs (`demand_zones`, green on the chart):
