@@ -324,11 +324,15 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
         lows = [p[0] for p in P[:-2] if p[1] == "l"]
         start_low[c:c2] = [lows[-1] if lows else None] * (c2 - c)
         if labels:
+            # The first swings of the window are never merged (merge_legs keeps the first swing), so an old swing that
+            # reaches the window edge would come back: only the swings from the third one on update the labels.
+            edge = P[2][0] if len(P) > 2 and lab else P[0][0]
             cur = {(q[0], q[1]) for q in P}
-            gone |= {key for key in lab if key[0] >= P[0][0] and key not in cur}
+            gone |= {key for key in lab if key[0] >= edge and key not in cur}
             for row in label_swings(P, st["keep"]):
-                lab[(row[0], row[1])] = row
-                gone.discard((row[0], row[1]))
+                if row[0] >= edge:
+                    lab[(row[0], row[1])] = row
+                    gone.discard((row[0], row[1]))
             if c2 == len(df):
                 levels = structure_levels(df, P, st, c2)
     for b in breaks:
