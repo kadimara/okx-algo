@@ -163,7 +163,7 @@ def leg_big_enough(prev, price):
     return abs(price / prev[-1][2] - 1) * 100 >= MIN_LEG
 
 
-def structure(close, P, i0, i1):
+def structure(close, P, i0, i1, track=None):
     """The leg structure on swings P over candles i0..i1-1, read like the hand-labelled chart (a close, not a wick,
     breaks a level):
     - a close below the structural low is a bearish break: the highest swing high since that low was set becomes
@@ -171,7 +171,8 @@ def structure(close, P, i0, i1):
       as the LH right away, so the range to break is [LL, LH];
     - swings inside the range that break nothing are internal. Bullish mirrored.
     A swing is used from its pivot candle on, so this only has no hindsight when every swing in P is confirmed.
-    With STRUCT_MODE "swing" the levels are simply the most recent swing high and low instead (see swing_structure)."""
+    With STRUCT_MODE "swing" the levels are simply the most recent swing high and low instead (see swing_structure).
+    track: a list that gets (hi, lo, trend, brk) after each candle's breaks (the state at its close)."""
     if STRUCT_MODE == "swing":
         return swing_structure(close, P, i0, i1)
     at = {t_idx[p[0]]: k for k, p in enumerate(P)}
@@ -203,6 +204,8 @@ def structure(close, P, i0, i1):
                 keep.add(hi)
             trend, lo, need, since_hi, brk = -1, None, None, None, i
         bias[i - i0] = trend
+        if track is not None:
+            track.append((hi, lo, trend, brk))
         k = at.get(i)
         if k is None:
             continue
@@ -313,6 +316,11 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
     trend, start, breaks = [0] * len(df), [None] * len(df), []
     start_low = [None] * len(df)
     lab, levels, gone = {}, None, set()     # gone: swings a later rebuild merged away (inside its window, not in its legs)
+    # The chart's right-edge view (no hindsight): the swing rows of each rebuild, diff encoded against the running list G
+    # ([c, n, tail]: G = G[:n] + tail from candle c on), and the MSS / MSB per candle ([time, price] or None).
+    G, rb = [], []
+    H_, L_ = df["high"].to_numpy(float), df["low"].to_numpy(float)
+    lv_mss, lv_msb = [None] * len(df), [None] * len(df)
     for e, c in enumerate(events):
         c2 = events[e + 1] if e + 1 < len(events) else len(df)
         known = ev[:bisect.bisect_right(conf_i, c)][-2 * window:]
@@ -323,7 +331,8 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
         if SETTLED_LEGS and len(P) > 4:
             Ps = P[:-1] if leg_big_enough(P[:-1], P[-1][2]) else P[:-2]
         i0 = t_idx[P[0][0]]
-        st = structure(close, Ps, i0, c2)
+        track = [] if labels else None
+        st = structure(close, Ps, i0, c2, track)
         trend[c:c2] = st["bias"][c - i0:]
         breaks += [b for b in st["breaks"] if b[0] >= c]
         highs = [p[0] for p in P[:-2] if p[1] == "h"]
@@ -342,6 +351,32 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
                     gone.discard((row[0], row[1]))
             if c2 == len(df):
                 levels = structure_levels(df, Ps, st, c2)
+            # only the newest 20 swings update the view: older ones only change by the window start (not real news)
+            e20 = Ps[max(2, len(Ps) - 20)][0] if G and len(Ps) > 2 else edge
+            rows = [[r[0], r[1], r[2], r[3], int(r[5])] for r in label_swings(Ps, st["keep"]) if r[0] >= e20]
+            cand = [g for g in G if g[0] < e20] + rows
+            k = 0
+            while k < min(len(G), len(cand)) and G[k] == cand[k]:
+                k += 1
+            if k < len(cand) or k < len(G):
+                rb.append([T[c], k, cand[k:]])
+            G = cand
+            ext_b, ext = None, None
+            for i in range(c, c2):
+                hi_, lo_, tr_, bk = track[i - i0]
+                mss, msb = (hi_, lo_) if tr_ < 0 else (lo_, hi_)
+                lv_mss[i] = None if mss is None else [Ps[mss][0], round(Ps[mss][2], 1)]
+                if msb is not None:
+                    lv_msb[i] = [Ps[msb][0], round(Ps[msb][2], 1)]
+                else:                                   # the leg after the break has no swing yet: its extreme so far
+                    if ext_b != (bk, tr_):
+                        ext_b, ext = (bk, tr_), bk
+                        for j in range(bk, i + 1):
+                            if (L_[j] < L_[ext]) if tr_ < 0 else (H_[j] > H_[ext]):
+                                ext = j
+                    elif (L_[i] < L_[ext]) if tr_ < 0 else (H_[i] > H_[ext]):
+                        ext = i
+                    lv_msb[i] = [T[ext], round(float(L_[ext] if tr_ < 0 else H_[ext]), 1)]
     for b in breaks:
         b[3] = trend[b[0] - 1]
     out = (trend, breaks, start, start_low) if low_start else (trend, breaks, start)
@@ -351,7 +386,8 @@ def live_structure(df, n, min_leg, window=120, low_start=False, labels=False):
     # the label comparison (each label compares with the previous real swing of the same type).
     real = relabel([r for key, r in sorted(lab.items()) if key not in gone])
     merged = [[r[0], r[1], "", r[3], r[4], True, 1] for key, r in sorted(lab.items()) if key in gone]
-    return out + ({"legs": sorted(real + merged, key=lambda r: (r[0], r[1])), "levels": levels},)
+    return out + ({"legs": sorted(real + merged, key=lambda r: (r[0], r[1])), "levels": levels,
+                   "rb": rb, "mss": lv_mss, "msb": lv_msb},)
 
 
 _MEMO = {}   # results of body_structure and of is_lower_high / is_higher_low per swing (the backtests ask the same swings for many variants)
@@ -618,7 +654,7 @@ def _is_lower_high(ev, conf_i, t, price, c):
     return bool(highs) and price < highs[-1][2]
 
 
-def supply_zones(df, n, bias, start):
+def supply_zones(df, n, bias, start, shown_out=None):
     O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
     atr = wilder_atr(df)
     ev = swing_events(df, n)
@@ -639,6 +675,8 @@ def supply_zones(df, n, bias, start):
         shown, end = zone_life(H, j, c, top, bot, t, bias, start, lh, need_bias=not lh or LH_BIAS)
         if shown is not None and (sharp or DRAW_GREY):
             out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(lh)])
+            if shown_out is not None:
+                shown_out.append(T[shown])
     return out
 
 
@@ -658,7 +696,8 @@ def zone_life(H, j, c, top, bot, t, bias, start, lh=False, need_bias=True):
     return shown, None
 
 
-supply = supply_zones(sig, LEG_N, leg_bias, swing_start)
+supply_shown = []
+supply = supply_zones(sig, LEG_N, leg_bias, swing_start, supply_shown)
 
 
 # Demand zones: the supply-zone rules mirrored for longs. Every 8-candle swing low; zone = the full range of that candle
@@ -727,7 +766,7 @@ def demand_life(L, j, c, top, bot, t, bias, start, hl=False, need_bias=True):
     return shown, None
 
 
-def demand_zones(df, n, bias, start):
+def demand_zones(df, n, bias, start, shown_out=None):
     O, H, L, C = (df[k].to_numpy(float) for k in ("open", "high", "low", "close"))
     atr = wilder_atr(df)
     ev = swing_events(df, n)
@@ -751,14 +790,28 @@ def demand_zones(df, n, bias, start):
         shown, end = demand_life(L, j, c, top, bot, t, bias, start, hl, need_bias=not hl or LH_BIAS)
         if shown is not None and (sharp or DRAW_GREY):
             out.append([T[j], None if end is None else T[end], round(top, 1), round(bot, 1), int(sharp), int(hl), int(ahh)])
+            if shown_out is not None:
+                shown_out.append(T[shown])
     return out
 
 
-demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low)
+demand_shown = []
+demand = demand_zones(sig, LEG_N, leg_bias, swing_start_low, demand_shown)
 
+
+
+def runs(vals):
+    """Run-length form of a per-candle list: [[candle index, value], ...] at each change."""
+    out = []
+    for i, v in enumerate(vals):
+        if not out or out[-1][1] != v:
+            out.append([i, v])
+    return out
 
 data = {"supply": supply, "demand": demand, "tfh": TFH, "n": strat.n, "candles": candles, "ltf": ltf, "swings": swings, "lower": lower,
-        "legs": live_lab["legs"], "legLevels": live_lab["levels"],   # labels and MSS / MSB lines: the live leg swings
+        # Legs, live: swings, MSS / MSB and zones as the live structure knew them at the right edge of the view (no hindsight)
+        "rb": live_lab.get("rb", []), "lvMss": runs(live_lab.get("mss", [])), "lvMsb": runs(live_lab.get("msb", [])),
+        "supplyShown": supply_shown, "demandShown": demand_shown, "legLevels": live_lab["levels"],
         "legsHind": legs, "legLevelsHind": leg_levels, "legBias": [float(b) for b in leg_bias],   # bias bar: the live bias (+-1 trend, +-0.5 pending MSS), as the zones use it
         "legN": LEG_N, "minLeg": MIN_LEG, "structMode": STRUCT_MODE,
         "sweeps": body_structure(sig, LEG_N)["sweeps"] if STRUCT_MODE == "body" else []}

@@ -92,7 +92,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
 
   <div class="legend">
     <div id="bodyNote" hidden><code>Body breaks</code> structure: pure 8-candle swings (no minimum leg). A level is the body edge of its swing candle (top of the body for a high, bottom for a low). A MSB / MSS is the first candle that opens and closes beyond it; a wick or a candle that opens inside does not break. At a break the extreme of the leg into it becomes the HL / LH. <code>×</code> sweep: a wick beyond a structural swing without a body break (no break within 3 candles).</div>
-    <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Each label compares the swing with the previous swing of the same type (HH / LH for highs, HL / LL for lows). Legs, live (default): the leg swings as the live bias and the zones saw them (internal / structural as in the last rebuild they were part of). A swing that a later rebuild merged away (a pullback under the minimum leg) is no real leg: a small grey dot without a label, and labels skip it. Legs, hindsight: the final legs (legs under the minimum % removed with hindsight). Structural swings (they set the structure: the levels that get broken and the extremes of the legs) are highlighted with an arrow and their label; internal swings are small faded dots without a label (toggle "Internal swings"): on the 2-day set a swing made at a break (not a real pivot), on the leg sets a swing inside the range that broke no structure.</div>
+    <div><code>HH LH HL LL</code> swing labels, placed on the swing candle. Each label compares the swing with the previous swing of the same type (HH / LH for highs, HL / LL for lows). Legs, live (default): everything as the live structure knew it at the right edge of the view, with no hindsight: the swings and labels of the last rebuild, the MSS / MSB lines of that candle and the zones known by then (scroll to move in time; fully right is now). Legs, hindsight: the final legs (legs under the minimum % removed with hindsight). Structural swings (they set the structure: the levels that get broken and the extremes of the legs) are highlighted with an arrow and their label; internal swings are small faded dots without a label (toggle "Internal swings"): on the 2-day set a swing made at a break (not a real pivot), on the leg sets a swing inside the range that broke no structure.</div>
     <div><code>▭</code> Supply zones: the candle that made each 8-candle swing high, its full range (a candle taller than 1% only its upper wick: from the high down to the body high, at least 0.5% tall), only when price dropped very sharply away from it (within 4 candles a low at least 2 ATR(14) below the zone). A box is drawn from that candle and only for zones that became known live (swing high confirmed) while the live bias (no hindsight) is bearish and before they were touched; it ends at the first candle that trades back into it after price left it, at a higher high, when the bias stops being bearish, or when a newer leg high settles (zones only count for the current swing). Zones touched before they were known are not drawn. Zones at a LH (the top of a pullback of at least the minimum leg % after the leg low, below the previous leg high) also need the bearish bias, but touches before the swing high is confirmed do not count. Bright boxes running to the right edge are still untouched.</div>
     <div><code>▭</code> Demand zones (green): only at a HL (a pullback in an uptrend), with a less sharp rise than supply (1.5 ATR and at least 1% within 4 candles), and not ended by a bearish MSS (only by a confirmed downtrend); otherwise the supply rules mirrored. The candle that made each 8-candle swing low (a candle taller than 1% only its lower wick: from the low up to the body low, at least 0.5% tall), only when price rose very sharply away from it (within 4 candles a high at least 2 ATR(14) above the candle). Drawn while the live bias is bullish and before price traded back into it; ended at the first candle that trades back into it after price left it, at a lower low, when the bias stops being bullish, or when a newer leg low settles. Zones at a HL (the bottom of a pullback below the previous leg high, above the previous leg low) also need the bias; touches before the swing low is confirmed do not count.</div>
     <div><code>┄</code> MSS / MSB: dotted lines at the current structure levels of the selected set (MSB = the last structural extreme, MSS = the swing that turns the trend when closed through). A close through the MSS line shifts the structure (against the trend); a close through the MSB line continues it. The bias bar follows the selected swing set.</div>
@@ -107,6 +107,29 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   const D = JSON.parse(document.getElementById("data").textContent);
   const C = D.candles, T = C.map(c => c[0]), lastT = T[T.length - 1];
   const tIdx = new Map(T.map((t, i) => [t, i]));
+
+  // "Legs, live": everything as the live structure knew it at the right edge of the view (no hindsight).
+  // D.rb: per rebuild [time, n, tail]: the swing rows [t, type, label, price, internal] are G = G.slice(0, n) + tail.
+  // D.lvMss / D.lvMsb: run-length [[candle index, [time, price] | null], ...] of the MSS / MSB level per candle.
+  const RB = D.rb || [], CK = [];                     // checkpoints: the rows after every 100th rebuild
+  { let G = []; RB.forEach((r, i) => { G = G.slice(0, r[1]).concat(r[2]); if (i % 100 === 0) CK.push(G); }); }
+  const lastLE = (arr, x, key) => { let lo = 0, hi = arr.length - 1, a = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (key(arr[m]) <= x) { a = m; lo = m + 1; } else hi = m - 1; } return a; };
+  function rowsAt(t) {                                // swing rows of the last rebuild at or before time t
+    const r = lastLE(RB, t, x => x[0]);
+    if (r < 0) return [];
+    const c = Math.floor(r / 100);
+    let G = CK[c];
+    for (let i = c * 100 + 1; i <= r; i++) G = G.slice(0, RB[i][1]).concat(RB[i][2]);
+    return G;
+  }
+  const runAt = (runs, i) => { const k = lastLE(runs || [], i, x => x[0]); return k < 0 ? null : runs[k][1]; };
+  let edge = C.length - 1;                            // the right-most candle in view
+  function edgeIndex() {
+    const r = chart.timeScale().getVisibleLogicalRange();
+    return r ? Math.max(0, Math.min(C.length - 1, Math.floor(r.to))) : C.length - 1;
+  }
+  const atEdge = () => show.set === "legs";
   const $ = id => document.getElementById(id);
 
   $("tf").textContent = D.tfh + "h";
@@ -139,13 +162,15 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     paint(target) {
       if (!show.lv || !this.chart) return;
       let lv;
-      if (show.set !== "swings") { const L = show.set === "legs" ? D.legLevels : D.legLevelsHind; lv = [[L.mss, "MSS"], [L.msb, "MSB"]]; }
+      if (atEdge()) lv = [[runAt(D.lvMss, edge), "MSS"], [runAt(D.lvMsb, edge), "MSB"]];
+      else if (show.set !== "swings") { const L = D.legLevelsHind; lv = [[L.mss, "MSS"], [L.msb, "MSB"]]; }
       else {
         const sw = D.swings, hi = [...sw].reverse().find(s => s[1] === "h"), lo = [...sw].reverse().find(s => s[1] === "l");
         const bear = D.ltf[D.ltf.length - 1] < 0;
         lv = [[hi && [hi[0], hi[3]], bear ? "MSS" : "MSB"], [lo && [lo[0], lo[3]], bear ? "MSB" : "MSS"]];
       }
-      const ts = this.chart.timeScale(), s = this.series, lastC = C[C.length - 1][4];
+      const ts = this.chart.timeScale(), s = this.series, lastC = C[atEdge() ? edge : C.length - 1][4];
+      const xe = atEdge() ? ts.logicalToCoordinate(edge) : null;
       target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
         ctx.font = `500 ${Math.round(11 * vr)}px ${areas.font}`;
         for (const [sv, name] of lv) {
@@ -153,7 +178,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
           const above = sv[1] > lastC;
           const x0 = ts.logicalToCoordinate(tIdx.get(sv[0])), y = s.priceToCoordinate(sv[1]);
           if (x0 == null || y == null) continue;
-          const yb = Math.round(y * vr) + 0.5, xa = x0 * hr, xb = bitmapSize.width;
+          const yb = Math.round(y * vr) + 0.5, xa = x0 * hr, xb = xe == null ? bitmapSize.width : xe * hr;
           ctx.strokeStyle = this.fg; ctx.fillStyle = this.fg; ctx.globalAlpha = 0.85;
           ctx.lineWidth = Math.max(1, Math.round(1.5 * hr)); ctx.setLineDash([2 * hr, 4 * hr]);
           ctx.beginPath(); ctx.moveTo(xa, yb); ctx.lineTo(xb, yb); ctx.stroke(); ctx.setLineDash([]);
@@ -210,14 +235,19 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
       const ts = this.chart.timeScale(), s = this.series, bar = ts.options().barSpacing || 6;
       target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
         ctx.lineWidth = Math.max(1, Math.round(hr));
-        const zs = [...(show.sz ? D.supply.map(z => [...z.slice(0, 5), areas.cols.down]) : []),
-                    ...(show.dz ? (D.demand || []).map(z => [...z.slice(0, 5), areas.cols.up]) : [])];
+        let zs = [...(show.sz ? D.supply.map((z, i) => [...z.slice(0, 5), areas.cols.down, (D.supplyShown || [])[i]]) : []),
+                  ...(show.dz ? (D.demand || []).map((z, i) => [...z.slice(0, 5), areas.cols.up, (D.demandShown || [])[i]]) : [])];
+        const xe = atEdge() ? ts.logicalToCoordinate(edge) : null;
+        if (atEdge()) {                               // as known at the right edge: shown by then, still active if it ended later
+          const te = T[edge];
+          zs = zs.filter(z => z[6] == null || z[6] <= te).map(z => z[1] != null && z[1] > te ? [z[0], null, ...z.slice(2)] : z);
+        }
         for (const [t0, t1, top, bot, sharp, col] of zs) {
           if (!sharp && !show.szg) continue;
           ctx.strokeStyle = ctx.fillStyle = sharp ? col : areas.cols.grey;
           const xa = ts.logicalToCoordinate(tIdx.get(t0)), xb = t1 == null ? null : ts.logicalToCoordinate(tIdx.get(t1));
           if (xa == null) continue;
-          const x1 = (xa - bar / 2) * hr, x2 = t1 == null ? bitmapSize.width : xb * hr;
+          const x1 = (xa - bar / 2) * hr, x2 = t1 == null ? (xe == null ? bitmapSize.width : (xe + bar / 2) * hr) : xb * hr;
           if (x2 < 0 || x1 > bitmapSize.width) continue;
           const y1 = s.priceToCoordinate(top), y2 = s.priceToCoordinate(bot);
           if (y1 == null || y2 == null) continue;
@@ -242,10 +272,16 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     strip.setData(T.map((t, i) => { const b = bias()[i];
       return { time: t, value: 1, color: b >= 1 ? k.up : b <= -1 ? k.down : b > 0 ? k.upSoft : b < 0 ? k.downSoft : k.line }; }));
 
-    const m = [];
+    markers();
+  }
+
+  function markers() {
+    const k = css(), m = [];
     // Structural swings (they set the structure) stand out: a larger marker with the label. Internal swings (inside the
     // range, broke nothing) are small faded dots without a label, hidden with the "Internal swings" toggle.
-    if (show.sw) for (const [t, ty, lab, , , internal, merged] of D[show.set]) {
+    // Legs, live: the swings of the live rebuild at the right edge of the view ([t, type, label, price, internal]).
+    const rows = atEdge() ? rowsAt(T[edge]).map(r => [r[0], r[1], r[2], r[3], null, r[4]]) : D[show.set];
+    if (show.sw) for (const [t, ty, lab, , , internal, merged] of rows) {
       const good = lab === "HH" || lab === "HL";
       if (internal && !show.int) continue;
       m.push(internal
@@ -270,7 +306,7 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
   $("tInt").addEventListener("change", e => { show.int = e.target.checked; draw(); });
   $("tSwp").addEventListener("change", e => { show.swp = e.target.checked; draw(); });
   if (D.structMode === "body") { $("lSwp").hidden = false; $("bodyNote").hidden = false; }
-  $("swSel").addEventListener("change", e => { show.set = e.target.value; draw(); readout(C.length - 1); });
+  $("swSel").addEventListener("change", e => { show.set = e.target.value; draw(); readout(edge); });
   $("tSz").addEventListener("change", e => { show.sz = e.target.checked; draw(); });
   $("tDz").addEventListener("change", e => { show.dz = e.target.checked; draw(); });
   $("tLv").addEventListener("change", e => { show.lv = e.target.checked; draw(); });
@@ -293,8 +329,22 @@ h1 { font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; te
     $("readout").innerHTML = `<span><b>${date(c[0])}</b> UTC</span><span>O <b>${fmt(c[1])}</b></span><span>H <b>${fmt(c[2])}</b></span>` +
       `<span>L <b>${fmt(c[3])}</b></span><span>C <b>${fmt(c[4])}</b></span><span>Bias ${pill(bias()[i])}</span><span>RSI 14 ${rsiTag(RSI[i])}</span>`;
   }
-  chart.subscribeCrosshairMove(p => readout((p.time != null ? tIdx.get(p.time) : undefined) ?? C.length - 1));
+  chart.subscribeCrosshairMove(p => readout((p.time != null ? tIdx.get(p.time) : undefined) ?? edge));
   readout(C.length - 1);
+  // Scrolling moves the right edge: the live structure as known at that candle (only redrawn when the edge candle changes)
+  let edgeReq = 0;
+  chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+    if (edgeReq) return;
+    edgeReq = requestAnimationFrame(() => {
+      edgeReq = 0;
+      const e = edgeIndex();
+      if (e === edge) return;
+      edge = e;
+      readout(edge);
+      if (atEdge()) { markers(); if (levels.req) levels.req(); if (supply.req) supply.req(); }
+    });
+  });
+  window.__chart = chart;   // test hook (Playwright) 
 
 
   // Screenshot: the chart canvas (candles, zones, lines, markers, bias bar, scales) with the readout line on top, as a PNG.
